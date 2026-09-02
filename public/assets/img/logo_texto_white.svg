@@ -1,0 +1,61 @@
+<svg viewBox="0 0 520 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#CC0000"/>
+      <stop offset="100%" stop-color="#8B0000"/>
+    </linearGradient>
+    <linearGradient id="shine3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="rnd3"><rect x="4" y="4" width="112" height="112" rx="24" ry="24"/></clipPath>
+  </defs>
+
+  <!-- Icon block -->
+  <rect x="4" y="4" width="112" height="112" rx="24" ry="24" fill="url(#bg3)"/>
+  <rect x="4" y="4" width="112" height="56" fill="url(#shine3)" clip-path="url(#rnd3)"/>
+
+  <g fill="white">
+    <rect x="18" y="14" width="3"  height="20" rx="1" opacity="0.95"/>
+    <rect x="24" y="14" width="5"  height="20" rx="1" opacity="0.95"/>
+    <rect x="32" y="14" width="2"  height="20" rx="1" opacity="0.95"/>
+    <rect x="37" y="14" width="4"  height="20" rx="1" opacity="0.95"/>
+    <rect x="44" y="14" width="3"  height="20" rx="1" opacity="0.95"/>
+    <rect x="50" y="14" width="5"  height="20" rx="1" opacity="0.95"/>
+    <rect x="58" y="14" width="3"  height="20" rx="1" opacity="0.95"/>
+    <rect x="64" y="14" width="4"  height="20" rx="1" opacity="0.95"/>
+    <rect x="71" y="14" width="2"  height="20" rx="1" opacity="0.95"/>
+    <rect x="76" y="14" width="4"  height="20" rx="1" opacity="0.95"/>
+    <rect x="83" y="14" width="5"  height="20" rx="1" opacity="0.95"/>
+    <rect x="91" y="14" width="3"  height="20" rx="1" opacity="0.95"/>
+    <rect x="97" y="14" width="4"  height="20" rx="1" opacity="0.95"/>
+    <rect x="104" y="14" width="3" height="20" rx="1" opacity="0.95"/>
+  </g>
+  <rect x="14" y="35" width="88" height="2.5" rx="1" fill="#FFD100"/>
+  <text x="60" y="86"
+        font-family="'Arial Black','Impact',sans-serif"
+        font-size="46" font-weight="900"
+        fill="white" text-anchor="middle" letter-spacing="-2">123</text>
+  <rect x="22" y="92" width="72" height="4" rx="2" fill="#FFD100"/>
+  <circle cx="12" cy="14" r="4" fill="#FFD100" opacity="0.9"/>
+
+  <!-- Text white version -->
+  <text x="142" y="58"
+        font-family="'Arial Black','Impact',sans-serif"
+        font-size="38" font-weight="900"
+        fill="white"
+        letter-spacing="1">INVENTARIO</text>
+
+  <text x="144" y="96"
+        font-family="'Arial Black','Impact',sans-serif"
+        font-size="30" font-weight="900"
+        fill="#FFD100"
+        letter-spacing="2">123</text>
+
+  <circle cx="232" cy="85" r="4" fill="rgba(255,255,255,0.5)"/>
+  <text x="244" y="96"
+        font-family="Arial,sans-serif"
+        font-size="16"
+        fill="rgba(255,255,255,0.7)"
+        letter-spacing="1">GESTIÓN DE ACTIVOS</text>
+</svg>

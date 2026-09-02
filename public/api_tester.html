@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sigma API Tester</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3350;
+    --accent: #4f7cff;
+    --accent2: #7c3aed;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 56px 1fr;
+  }
+
+  /* ── Header ── */
+  header {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 24px;
+  }
+  .logo {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff; flex-shrink: 0;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+  header span { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .base-url-bar {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .base-url-bar label { font-size: 12px; color: var(--muted); }
+  .base-url-bar input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 10px;
+    width: 320px;
+    outline: none;
+  }
+  .base-url-bar input:focus { border-color: var(--accent); }
+
+  /* ── Sidebar ── */
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+  .group-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 12px 16px 6px;
+  }
+  .ep-btn {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 8px 16px;
+    background: none; border: none; cursor: pointer;
+    color: var(--text); font-family: var(--sans); font-size: 13px;
+    text-align: left; transition: background 0.15s;
+    border-left: 2px solid transparent;
+  }
+  .ep-btn:hover { background: var(--surface2); }
+  .ep-btn.active {
+    background: rgba(79,124,255,0.1);
+    border-left-color: var(--accent);
+    color: #fff;
+  }
+  .method-badge {
+    font-size: 10px; font-weight: 700; font-family: var(--mono);
+    padding: 2px 6px; border-radius: 4px;
+    flex-shrink: 0; min-width: 38px; text-align: center;
+  }
+  .GET  { background: rgba(34,197,94,0.15);  color: #4ade80; }
+  .POST { background: rgba(245,158,11,0.15); color: #fbbf24; }
+
+  /* ── Main panel ── */
+  main {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-top {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+    flex-shrink: 0;
+  }
+  .panel-top h2 { font-size: 16px; font-weight: 600; }
+  .panel-top .desc { font-size: 13px; color: var(--muted); margin-left: auto; }
+
+  /* Request URL display */
+  .url-display {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 14px;
+    color: var(--muted);
+    margin: 0 24px 16px;
+    flex-shrink: 0;
+    word-break: break-all;
+  }
+  .url-display strong { color: var(--accent); }
+
+  /* Params section */
+  .params-section {
+    padding: 0 24px;
+    flex-shrink: 0;
+  }
+  .params-section h3 {
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input, .field select, .field textarea {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 7px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--accent);
+  }
+  .field textarea { min-height: 80px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+  .field select option { background: var(--surface2); }
+
+  .send-btn {
+    margin: 0 24px 16px;
+    padding: 10px 28px;
+    background: var(--accent);
+    border: none; border-radius: 8px;
+    color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+    display: flex; align-items: center; gap: 8px;
+    width: fit-content;
+  }
+  .send-btn:hover { opacity: 0.9; }
+  .send-btn:active { transform: scale(0.98); }
+  .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .send-btn .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Response */
+  .response-area {
+    flex: 1; overflow: hidden;
+    display: flex; flex-direction: column;
+    margin: 0 24px 24px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-height: 0;
+  }
+  .response-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    border-radius: 10px 10px 0 0;
+    flex-shrink: 0;
+  }
+  .response-header span { font-size: 12px; color: var(--muted); }
+  .status-pill {
+    font-size: 12px; font-weight: 700; font-family: var(--mono);
+    padding: 2px 10px; border-radius: 20px;
+  }
+  .status-ok   { background: rgba(34,197,94,0.15); color: #4ade80; }
+  .status-err  { background: rgba(239,68,68,0.15);  color: #f87171; }
+  .status-warn { background: rgba(245,158,11,0.15); color: #fbbf24; }
+  .copy-btn {
+    margin-left: auto;
+    background: none; border: 1px solid var(--border);
+    border-radius: 6px; color: var(--muted);
+    font-size: 12px; padding: 4px 10px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  pre {
+    flex: 1; overflow: auto;
+    padding: 16px;
+    font-family: var(--mono); font-size: 12px;
+    line-height: 1.6;
+    background: var(--bg);
+    border-radius: 0 0 10px 10px;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .placeholder {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--muted); gap: 8px;
+    font-size: 14px;
+    background: var(--bg);
+    border-radius: 0 0 10px 10px;
+  }
+  .placeholder-icon { font-size: 32px; opacity: 0.3; }
+
+  /* JSON coloring */
+  .jk { color: #93c5fd; }   /* key */
+  .js { color: #86efac; }   /* string */
+  .jn { color: #fca5a5; }   /* number */
+  .jb { color: #c4b5fd; }   /* bool/null */
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">S</div>
+  <h1>Sigma API Tester</h1>
+  <span>ApiController</span>
+  <div class="base-url-bar">
+    <label>Front Controller</label>
+    <input type="text" id="baseUrl" value="index.php">
+  </div>
+</header>
+
+<aside>
+  <div class="group-label">Catálogos</div>
+  <button class="ep-btn active" onclick="selectEp('catalogos')">
+    <span class="method-badge GET">GET</span> obtenerCatalogos
+  </button>
+  <button class="ep-btn" onclick="selectEp('modelosPorTipo')">
+    <span class="method-badge GET">GET</span> modelosPorTipo
+  </button>
+  <button class="ep-btn" onclick="selectEp('plazasPorNegocio')">
+    <span class="method-badge GET">GET</span> plazasPorNegocio
+  </button>
+
+  <div class="group-label">Activos</div>
+  <button class="ep-btn" onclick="selectEp('listarActivos')">
+    <span class="method-badge GET">GET</span> listarActivos
+  </button>
+  <button class="ep-btn" onclick="selectEp('guardarActivo')">
+    <span class="method-badge POST">POST</span> guardarActivo
+  </button>
+  <button class="ep-btn" onclick="selectEp('actualizarActivo')">
+    <span class="method-badge POST">POST</span> actualizarActivo
+  </button>
+  <button class="ep-btn" onclick="selectEp('eliminarActivo')">
+    <span class="method-badge POST">POST</span> eliminarActivo
+  </button>
+
+  <div class="group-label">Auth</div>
+  <button class="ep-btn" onclick="selectEp('login')">
+    <span class="method-badge POST">POST</span> login
+  </button>
+</aside>
+
+<main>
+  <div class="panel-top">
+    <div id="epMethodBadge" class="method-badge GET">GET</div>
+    <h2 id="epTitle">obtenerCatalogos</h2>
+    <span class="desc" id="epDesc">Devuelve tipos, modelos, estatus, tiendas, plazas, negocios y usuarios</span>
+  </div>
+
+  <div class="url-display" id="urlDisplay">
+    <strong>GET</strong> &nbsp;
+    <span id="urlPreview"></span>
+  </div>
+
+  <div class="params-section">
+    <h3>Parámetros</h3>
+    <div class="params-grid" id="paramsGrid"></div>
+  </div>
+
+  <button class="send-btn" id="sendBtn" onclick="sendRequest()">
+    <div class="spinner" id="spinner"></div>
+    <span id="sendLabel">Enviar solicitud</span>
+  </button>
+
+  <div class="response-area">
+    <div class="response-header">
+      <span>Respuesta</span>
+      <span id="statusPill"></span>
+      <span id="timeLabel" style="color:var(--muted);font-size:12px;"></span>
+      <button class="copy-btn" onclick="copyResponse()">Copiar</button>
+    </div>
+    <div class="placeholder" id="placeholder">
+      <div class="placeholder-icon">⬡</div>
+      <span>Envía una solicitud para ver la respuesta</span>
+    </div>
+    <pre id="responseBody" style="display:none"></pre>
+  </div>
+</main>
+
+<script>
+const BASE = () => document.getElementById('baseUrl').value.trim();
+
+const ENDPOINTS = {
+  catalogos: {
+    method: 'GET', action: 'obtenerCatalogos',
+    title: 'obtenerCatalogos',
+    desc: 'Devuelve tipos, modelos, estatus, tiendas, plazas, negocios y usuarios',
+    params: []
+  },
+  modelosPorTipo: {
+    method: 'GET', action: 'obtenerModelosPorTipo',
+    title: 'obtenerModelosPorTipo',
+    desc: 'Modelos filtrados por tipo de equipo',
+    params: [
+      { key: 'tipo_id', label: 'tipo_id', type: 'number', placeholder: '1' }
+    ]
+  },
+  plazasPorNegocio: {
+    method: 'GET', action: 'obtenerPlazasPorNegocio',
+    title: 'obtenerPlazasPorNegocio',
+    desc: 'Plazas filtradas por negocio',
+    params: [
+      { key: 'negocio_id', label: 'negocio_id', type: 'number', placeholder: '1 = OXXO, 2 = CAFFENIO...' }
+    ]
+  },
+  listarActivos: {
+    method: 'GET', action: 'listarActivos',
+    title: 'listarActivos',
+    desc: 'Lista paginada con filtros opcionales',
+    params: [
+      { key: 'busqueda',   label: 'busqueda',   type: 'text',   placeholder: 'Serie, placa, modelo...' },
+      { key: 'negocio_id', label: 'negocio_id', type: 'number', placeholder: '' },
+      { key: 'plaza_id',   label: 'plaza_id',   type: 'number', placeholder: '' },
+      { key: 'estatus_id', label: 'estatus_id', type: 'select',
+        options: [
+          { value: '', label: 'Todos' },
+          { value: '1', label: '1 — EN_USO' },
+          { value: '2', label: '2 — EN_BODEGA' },
+          { value: '3', label: '3 — REPARACION' },
+          { value: '4', label: '4 — BAJA' }
+        ]
+      },
+      { key: 'tipo_id',    label: 'tipo_id',    type: 'number', placeholder: '' },
+      { key: 'usuario_id', label: 'usuario_id', type: 'number', placeholder: '' },
+      { key: 'pagina',     label: 'pagina',     type: 'number', placeholder: '1' },
+      { key: 'por_pagina', label: 'por_pagina', type: 'number', placeholder: '20' },
+    ]
+  },
+  guardarActivo: {
+    method: 'POST', action: 'guardarActivo',
+    title: 'guardarActivo',
+    desc: 'Crea un nuevo activo (multipart/form-data)',
+    params: [
+      { key: 'tipo_id',        label: 'tipo_id *',      type: 'number', placeholder: '' },
+      { key: 'modelo_id',      label: 'modelo_id',      type: 'number', placeholder: '' },
+      { key: 'numero_serie',   label: 'numero_serie *', type: 'text',   placeholder: 'SN-001' },
+      { key: 'activo_fijo',    label: 'activo_fijo',    type: 'text',   placeholder: 'AF-001' },
+      { key: 'estatus_id',     label: 'estatus_id',     type: 'select',
+        options: [
+          { value: '2', label: '2 — EN_BODEGA (default)' },
+          { value: '1', label: '1 — EN_USO' },
+          { value: '3', label: '3 — REPARACION' },
+          { value: '4', label: '4 — BAJA' }
+        ]
+      },
+      { key: 'tienda_id',      label: 'tienda_id',      type: 'number', placeholder: '' },
+      { key: 'usuario_id',     label: 'usuario_id',     type: 'number', placeholder: '' },
+      { key: 'procedencia_id', label: 'procedencia_id', type: 'number', placeholder: '' },
+    ]
+  },
+  actualizarActivo: {
+    method: 'POST', action: 'actualizarActivo',
+    title: 'actualizarActivo',
+    desc: 'Actualiza un activo existente por ID',
+    params: [
+      { key: 'id',             label: 'id *',           type: 'number', placeholder: '' },
+      { key: 'tipo_id',        label: 'tipo_id',        type: 'number', placeholder: '' },
+      { key: 'modelo_id',      label: 'modelo_id',      type: 'number', placeholder: '' },
+      { key: 'numero_serie',   label: 'numero_serie',   type: 'text',   placeholder: '' },
+      { key: 'activo_fijo',    label: 'activo_fijo',    type: 'text',   placeholder: '' },
+      { key: 'estatus_id',     label: 'estatus_id',     type: 'select',
+        options: [
+          { value: '', label: '— sin cambiar —' },
+          { value: '1', label: '1 — EN_USO' },
+          { value: '2', label: '2 — EN_BODEGA' },
+          { value: '3', label: '3 — REPARACION' },
+          { value: '4', label: '4 — BAJA' }
+        ]
+      },
+      { key: 'tienda_id',      label: 'tienda_id',      type: 'number', placeholder: '' },
+      { key: 'usuario_id',     label: 'usuario_id',     type: 'number', placeholder: '' },
+      { key: 'procedencia_id', label: 'procedencia_id', type: 'number', placeholder: '' },
+    ]
+  },
+  eliminarActivo: {
+    method: 'POST', action: 'eliminarActivo',
+    title: 'eliminarActivo',
+    desc: 'Soft-delete de un activo (solo admin)',
+    params: [
+      { key: 'id', label: 'id *', type: 'number', placeholder: 'ID del activo a eliminar' }
+    ]
+  },
+  login: {
+    method: 'POST', action: 'login',
+    title: 'login',
+    desc: 'Autenticación — body JSON',
+    params: [
+      { key: 'email',    label: 'email *',    type: 'text',     placeholder: 'admin@sigma.com' },
+      { key: 'password', label: 'password *', type: 'password', placeholder: '••••••••' }
+    ]
+  }
+};
+
+let currentEp = 'catalogos';
+
+function selectEp(key) {
+  currentEp = key;
+  const ep = ENDPOINTS[key];
+
+  document.querySelectorAll('.ep-btn').forEach(b => b.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  const badge = document.getElementById('epMethodBadge');
+  badge.textContent = ep.method;
+  badge.className = 'method-badge ' + ep.method;
+
+  document.getElementById('epTitle').textContent = ep.title;
+  document.getElementById('epDesc').textContent = ep.desc;
+  document.getElementById('urlDisplay').querySelector('strong').textContent = ep.method;
+
+  renderParams(ep);
+  updateUrlPreview();
+  clearResponse();
+}
+
+function renderParams(ep) {
+  const grid = document.getElementById('paramsGrid');
+  grid.innerHTML = '';
+
+  if (!ep.params.length) {
+    grid.innerHTML = '<span style="font-size:13px;color:var(--muted);grid-column:1/-1">Sin parámetros requeridos</span>';
+    return;
+  }
+
+  ep.params.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'field';
+    div.innerHTML = `<label>${p.label}</label>`;
+
+    if (p.type === 'select') {
+      const sel = document.createElement('select');
+      sel.id = 'param_' + p.key;
+      sel.name = p.key;
+      p.options.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        opt.textContent = o.label;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', updateUrlPreview);
+      div.appendChild(sel);
+    } else {
+      const inp = document.createElement('input');
+      inp.type = p.type || 'text';
+      inp.id = 'param_' + p.key;
+      inp.name = p.key;
+      inp.placeholder = p.placeholder || '';
+      inp.addEventListener('input', updateUrlPreview);
+      div.appendChild(inp);
+    }
+
+    grid.appendChild(div);
+  });
+}
+
+function getParamValues() {
+  const ep = ENDPOINTS[currentEp];
+  const values = {};
+  ep.params.forEach(p => {
+    const el = document.getElementById('param_' + p.key);
+    if (el && el.value.trim() !== '') {
+      values[p.key] = el.value.trim();
+    }
+  });
+  return values;
+}
+
+function buildUrl(ep, extraParams) {
+  const base = BASE();
+  const ctrl = ep.action === 'login' ? 'auth' : 'api';
+  let url = base + '?controller=' + ctrl + '&action=' + ep.action;
+  if (extraParams) {
+    Object.entries(extraParams).forEach(([k, v]) => {
+      url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(v);
+    });
+  }
+  return url;
+}
+
+function updateUrlPreview() {
+  const ep = ENDPOINTS[currentEp];
+  const params = ep.method === 'GET' ? getParamValues() : {};
+  document.getElementById('urlPreview').textContent = buildUrl(ep, params);
+}
+
+async function sendRequest() {
+  const ep = ENDPOINTS[currentEp];
+  const btn = document.getElementById('sendBtn');
+  const spinner = document.getElementById('spinner');
+  const label = document.getElementById('sendLabel');
+  const params = getParamValues();
+  const base = BASE();
+
+  btn.disabled = true;
+  spinner.style.display = 'block';
+  label.textContent = 'Enviando...';
+  clearResponse();
+
+  const t0 = performance.now();
+
+  try {
+    let response;
+
+    const url = buildUrl(ep, ep.method === 'GET' ? params : null);
+
+    if (ep.method === 'GET') {
+      response = await fetch(url, { credentials: 'include' });
+
+    } else if (ep.action === 'login') {
+      response = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      });
+
+    } else {
+      const fd = new FormData();
+      Object.entries(params).forEach(([k, v]) => fd.append(k, v));
+      response = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd
+      });
+    }
+
+    const elapsed = Math.round(performance.now() - t0);
+    const text = await response.text();
+
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
+
+    showResponse(response.status, parsed ?? text, elapsed);
+
+  } catch (err) {
+    const elapsed = Math.round(performance.now() - t0);
+    showResponse(0, { error: err.message, hint: 'Verifica que el servidor esté corriendo y la URL sea correcta' }, elapsed);
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    label.textContent = 'Enviar solicitud';
+  }
+}
+
+function showResponse(status, data, ms) {
+  const pill = document.getElementById('statusPill');
+  const pre  = document.getElementById('responseBody');
+  const ph   = document.getElementById('placeholder');
+  const time = document.getElementById('timeLabel');
+
+  let cls = status >= 200 && status < 300 ? 'status-ok'
+          : status >= 400 ? 'status-err'
+          : 'status-warn';
+
+  pill.innerHTML = `<span class="status-pill ${cls}">${status || 'ERROR'}</span>`;
+  time.textContent = ms + ' ms';
+
+  ph.style.display = 'none';
+  pre.style.display = 'block';
+  pre.innerHTML = typeof data === 'string'
+    ? escHtml(data)
+    : syntaxHighlight(JSON.stringify(data, null, 2));
+}
+
+function clearResponse() {
+  document.getElementById('statusPill').innerHTML = '';
+  document.getElementById('timeLabel').textContent = '';
+  document.getElementById('responseBody').style.display = 'none';
+  document.getElementById('placeholder').style.display = 'flex';
+}
+
+function syntaxHighlight(json) {
+  return escHtml(json).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+\.?\d*([eE][+\-]?\d+)?)/g,
+    match => {
+      if (/^"/.test(match)) {
+        return /:$/.test(match)
+          ? `<span class="jk">${match}</span>`
+          : `<span class="js">${match}</span>`;
+      }
+      if (/true|false|null/.test(match)) return `<span class="jb">${match}</span>`;
+      return `<span class="jn">${match}</span>`;
+    }
+  );
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function copyResponse() {
+  const pre = document.getElementById('responseBody');
+  if (!pre.textContent) return;
+  navigator.clipboard.writeText(pre.textContent);
+  const btn = event.currentTarget;
+  btn.textContent = '¡Copiado!';
+  setTimeout(() => btn.textContent = 'Copiar', 1500);
+}
+
+// Init
+renderParams(ENDPOINTS['catalogos']);
+updateUrlPreview();
+document.getElementById('baseUrl').addEventListener('input', updateUrlPreview);
+</script>
+</body>
+</html>

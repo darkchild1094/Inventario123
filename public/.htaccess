@@ -1,0 +1,22 @@
+Options -MultiViews -Indexes
+RewriteEngine On
+
+# Servir archivos de uploads/ y assets/ directamente sin pasar por PHP.
+# IMPORTANTE: esto va SIN depender de %{DOCUMENT_ROOT}%{REQUEST_URI} -f,
+# porque en hosting tipo "alias" (alwaysdata) ese check puede fallar y
+# mandar estas peticiones a index.php en vez de servir el archivo real
+# (causa raíz de que el logo no cargue en navbar/login pese a existir
+# físicamente en el servidor).
+RewriteRule ^uploads/ - [L]
+RewriteRule ^assets/  - [L]
+
+# Si el archivo o directorio existe físicamente, servirlo directo.
+# Se usa %{DOCUMENT_ROOT}%{REQUEST_URI} en vez de %{REQUEST_FILENAME}:
+# en configuraciones de sitio tipo "alias" (una dirección mapeada a una
+# subcarpeta, como en alwaysdata) REQUEST_FILENAME puede no reflejar la
+# ruta física real y causar un bucle de reescritura (AH00124).
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI} !-f
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI} !-d
+
+# Todo lo demás va a index.php
+RewriteRule ^(.*)$ index.php [QSA,L]
