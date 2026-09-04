@@ -4,3 +4,10 @@
 /.idea/
 /.vscode/
 .DS_Store
+
+# Volcados de datos reales (inventario, empleados, hashes de password):
+# no deben quedar públicos en el repo. Los .sql de schema (migraciones sin
+# datos masivos) sí se versionan; ver database/migrations/.
+/femsa_assets.sql
+/database/migrations/004_import_activos_maf.up.sql
+/database/migrations/006_codigo_barras_num_activo.up.sql

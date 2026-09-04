@@ -167,16 +167,22 @@ if ($stockTipo === 'usuario') {
                             </select>
                         </div>
 
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label text-primary">Serie <span class="text-danger">*</span></label>
                             <input type="text" name="serie" class="form-control border-primary" required
                                    value="<?= htmlspecialchars($activo['serie'] ?? '') ?>">
                         </div>
 
-                        <div class="col-md-6">
-                            <label class="form-label">Placa / Activo Fijo</label>
-                            <input type="text" name="placa" class="form-control"
-                                   value="<?= htmlspecialchars($activo['placa'] ?? '') ?>">
+                        <div class="col-md-4">
+                            <label class="form-label">Código de barras</label>
+                            <input type="text" name="codigo_barras" class="form-control"
+                                   value="<?= htmlspecialchars($activo['codigo_barras'] ?? '') ?>">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">N° de activo</label>
+                            <input type="text" name="num_activo" class="form-control"
+                                   value="<?= htmlspecialchars($activo['num_activo'] ?? '') ?>">
                         </div>
 
                     </div>
@@ -254,7 +260,8 @@ if ($stockTipo === 'usuario') {
                             <label class="form-label text-success fw-bold">
                                 <i class="fas fa-store me-1"></i> Tienda en uso <span class="text-danger">*</span>
                             </label>
-                            <select name="tienda_uso_id" id="select_tienda_uso" class="form-select">
+                            <select name="tienda_uso_id" id="select_tienda_uso" class="form-select"
+                                    onchange="cargarReemplazos()">
                                 <option value="">Seleccione tienda...</option>
                                 <?php foreach ($tiendasPlaza as $t): ?>
                                     <option value="<?= $t['id'] ?>"
@@ -263,6 +270,57 @@ if ($stockTipo === 'usuario') {
                                     </option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+
+                        <!-- ¿REEMPLAZA A? (si la tienda ya tiene un activo del mismo dispositivo) -->
+                        <div class="col-md-6 campo-condicional" id="campo_reemplazo">
+                            <label class="form-label text-warning fw-bold">
+                                <i class="fas fa-right-left me-1"></i> ¿Reemplaza a?
+                            </label>
+                            <select name="reemplaza_activo_id" id="select_reemplazo" class="form-select"
+                                    onchange="manejarReemplazo()">
+                                <option value="">— Ninguno (equipo adicional) —</option>
+                            </select>
+                            <small class="text-muted">Elige qué activo SALE de la tienda en su lugar.</small>
+                        </div>
+
+                        <!-- EQUIPO QUE SALE (destino del reemplazado) -->
+                        <div class="col-12 campo-condicional" id="campo_salida">
+                            <div class="border rounded p-3 bg-light">
+                                <label class="form-label fw-bold mb-2">
+                                    <i class="fas fa-box-open me-1"></i> Equipo que sale — destino
+                                </label>
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <select name="salida_destino" id="salida_destino" class="form-select"
+                                                onchange="manejarSalida()">
+                                            <option value="asignado" selected>Asignar a usuario</option>
+                                            <option value="en_bodega">Enviar a bodega</option>
+                                            <option value="garantia">Garantía</option>
+                                            <option value="baja">Baja</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-5" id="salida_usuario_wrap">
+                                        <select name="salida_usuario_id" id="salida_usuario_id" class="form-select"></select>
+                                    </div>
+                                    <div class="col-md-5 d-none" id="salida_ati_wrap">
+                                        <select name="salida_ati_usuario_id" id="salida_ati_usuario_id" class="form-select">
+                                            <option value="">ATI de la tienda (automático)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ATI RESPONSABLE (estatus garantía / baja) -->
+                        <div class="col-md-6 campo-condicional" id="campo_ati">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-user-shield me-1"></i> ATI responsable
+                            </label>
+                            <select name="ati_usuario_id" id="select_ati" class="form-select">
+                                <option value="">ATI de la tienda (automático)</option>
+                            </select>
+                            <small class="text-muted">Garantía y baja quedan en el stock de este ATI.</small>
                         </div>
 
                         <!-- INFO BODEGA (fs/ati al elegir en_bodega) ──────── -->
@@ -357,6 +415,80 @@ const ES_FS          = <?= $esFs    ? 'true' : 'false' ?>;
 const ES_ATI         = <?= $esAti   ? 'true' : 'false' ?>;
 const MODELO_ACTUAL  = <?= (int)($activo['modelo_id']    ?? 0) ?>;
 const STATUS_ACTUAL  = '<?= $statusActual ?>';
+const PLAZA_ID       = <?= (int)$plazaId ?>;
+const ACTIVO_ID      = <?= (int)$activo['id'] ?>;
+const USUARIO_ACTUAL = <?= (int)$usuarioId ?>;
+const USUARIOS_PLAZA = <?= json_encode(array_map(fn($u) => ['id' => (int)$u['id'], 'nombre' => $u['nombre'], 'tipo' => $u['tipo']], $usuariosPlaza), JSON_UNESCAPED_UNICODE) ?>;
+
+// ── Selector "¿Reemplaza a?": activos del mismo dispositivo ya en esa tienda ──
+async function cargarReemplazos() {
+    const est    = document.getElementById('estatus').value;
+    const tienda = document.getElementById('select_tienda_uso');
+    const disp   = document.getElementById('dispositivo');
+    const cRe    = document.getElementById('campo_reemplazo');
+    const sRe    = document.getElementById('select_reemplazo');
+    if (!cRe || !sRe) return;
+
+    if (est !== 'en_uso' || !tienda || !tienda.value || !disp || !disp.value) {
+        cRe.style.display = 'none';
+        sRe.value = '';
+        manejarReemplazo();
+        return;
+    }
+    try {
+        const r = await fetch(`index.php?controller=api&action=obtenerActivosEnTiendaPorDispositivo&tienda_id=${tienda.value}&dispositivo_id=${disp.value}&excepto_id=${ACTIVO_ID}`);
+        const data = await r.json();
+        sRe.innerHTML = '<option value="">— Ninguno (equipo adicional) —</option>';
+        (data || []).forEach(a => sRe.appendChild(new Option(`${a.modelo_nombre || ''} · ${a.serie}`, a.id)));
+        cRe.style.display = (data && data.length) ? 'block' : 'none';
+    } catch (e) { cRe.style.display = 'none'; }
+    manejarReemplazo();
+}
+
+function manejarReemplazo() {
+    const sRe = document.getElementById('select_reemplazo');
+    const cSal = document.getElementById('campo_salida');
+    if (cSal) cSal.style.display = (sRe && sRe.value) ? 'block' : 'none';
+    if (sRe && sRe.value) { poblarSalidaUsuarios(); manejarSalida(); }
+}
+
+function poblarSalidaUsuarios() {
+    const sel = document.getElementById('salida_usuario_id');
+    if (!sel || sel.dataset.listo) return;
+    sel.innerHTML = '';
+    if (ES_FS) {
+        sel.appendChild(new Option('Yo mismo', USUARIO_ACTUAL));
+        sel.value = USUARIO_ACTUAL;
+    } else {
+        USUARIOS_PLAZA.forEach(u => sel.appendChild(new Option(`${u.nombre} (${u.tipo.toUpperCase()})`, u.id)));
+        sel.value = USUARIO_ACTUAL;
+    }
+    sel.dataset.listo = '1';
+}
+
+function manejarSalida() {
+    const dest = document.getElementById('salida_destino').value;
+    const uw = document.getElementById('salida_usuario_wrap');
+    const aw = document.getElementById('salida_ati_wrap');
+    if (uw) uw.classList.toggle('d-none', dest !== 'asignado');
+    if (aw) aw.classList.toggle('d-none', dest !== 'garantia' && dest !== 'baja');
+}
+
+async function cargarAtis() {
+    if (!PLAZA_ID) return;
+    try {
+        const r = await fetch(`index.php?controller=api&action=obtenerAtisPorPlaza&plaza_id=${PLAZA_ID}`);
+        const data = await r.json();
+        ['select_ati', 'salida_ati_usuario_id'].forEach(id => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            const primera = sel.options[0];
+            sel.innerHTML = '';
+            sel.appendChild(primera);
+            (data || []).forEach(u => sel.appendChild(new Option(u.nombre, u.id)));
+        });
+    } catch (e) { /* noop */ }
+}
 
 // ── Cargar modelos pre-seleccionando el actual ─────────────────────────────
 function cargarModelos(preselect = null) {
@@ -387,14 +519,22 @@ function manejarEstatus() {
     const cTienda   = document.getElementById('campo_tienda_uso');
     const cBodega   = document.getElementById('campo_bodega_info');
     const cStockDst = document.getElementById('campo_bodega_destino');
+    const cAti      = document.getElementById('campo_ati');
+    const cReempl   = document.getElementById('campo_reemplazo');
+    const cSalida   = document.getElementById('campo_salida');
     const sTienda   = document.getElementById('select_tienda_uso');
     const sAsig     = document.getElementById('select_asignado');
     const sStockDst = document.getElementById('select_bodega_destino');
 
-    [cAsig, cTienda, cBodega, cStockDst].forEach(el => { if (el) el.style.display = 'none'; });
+    [cAsig, cTienda, cBodega, cStockDst, cAti, cReempl, cSalida].forEach(el => { if (el) el.style.display = 'none'; });
     if (sTienda)   sTienda.required = false;
     if (sAsig)     sAsig.required   = false;
     if (sStockDst) sStockDst.value  = '';
+
+    // Garantía / baja → elegir ATI responsable de la tienda
+    if ((est === 'garantia' || est === 'baja') && cAti) cAti.style.display = 'block';
+    // En uso → ofrecer el selector de reemplazo (según la tienda/dispositivo)
+    if (est === 'en_uso') setTimeout(cargarReemplazos, 0);
 
     if (ES_ADMIN) {
         if (est === 'asignado') {
@@ -454,8 +594,13 @@ document.addEventListener('keydown', e => {
 document.addEventListener('DOMContentLoaded', () => {
     // Cargar modelos del dispositivo actual
     cargarModelos(MODELO_ACTUAL);
+    // ATIs de la plaza para los selectores de responsable
+    cargarAtis();
     // Mostrar campos según el status actual del activo
     manejarEstatus();
+    // Recalcular el selector de reemplazo si cambia el dispositivo
+    const disp = document.getElementById('dispositivo');
+    if (disp) disp.addEventListener('change', () => setTimeout(cargarReemplazos, 300));
 });
 </script>
 </body>

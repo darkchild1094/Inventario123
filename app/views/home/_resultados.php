@@ -69,21 +69,28 @@
                                     </span>
                                 </div>
                                 <div class="d-flex justify-content-between small text-muted mb-1">
-                                    <span><i class="fas fa-tag me-1"></i>Placa:</span>
+                                    <span><i class="fas fa-barcode me-1"></i>Código:</span>
                                     <span class="fw-bold text-dark">
-                                        <?= htmlspecialchars($a['placa'] ?? '—') ?>
+                                        <?= htmlspecialchars($a['codigo_barras'] ?? '—') ?>
                                     </span>
                                 </div>
-                                <div class="d-flex justify-content-between small text-muted">
-                                    <span><i class="fas fa-store me-1"></i>
-                                        <?= $a['stock_tipo'] === 'usuario' ? 'Técnico:' : 'Bodega:' ?>
+                                <div class="d-flex justify-content-between small text-muted mb-1">
+                                    <span><i class="fas fa-hashtag me-1"></i>N° activo:</span>
+                                    <span class="fw-bold text-dark">
+                                        <?= htmlspecialchars($a['num_activo'] ?? '—') ?>
                                     </span>
+                                </div>
+                                <?php
+                                [$stockLabel, $stockValor] = match ($a['stock_tipo'] ?? '') {
+                                    'usuario' => ['Técnico:', $a['usuario_nombre'] ?? '—'],
+                                    'tienda'  => ['Tienda:',  $a['tienda_stock_nombre'] ?? '—'],
+                                    default   => ['Bodega:',  $a['bodega_nombre'] ?? '—'],
+                                };
+                                ?>
+                                <div class="d-flex justify-content-between small text-muted">
+                                    <span><i class="fas fa-store me-1"></i><?= $stockLabel ?></span>
                                     <span class="fw-bold text-dark text-truncate" style="max-width:130px;">
-                                        <?= htmlspecialchars(
-                                            $a['stock_tipo'] === 'usuario'
-                                                ? ($a['usuario_nombre'] ?? '—')
-                                                : ($a['bodega_nombre']  ?? '—')
-                                        ) ?>
+                                        <?= htmlspecialchars($stockValor) ?>
                                     </span>
                                 </div>
                                 <?php if (!empty($a['tienda_uso_nombre'])): ?>
@@ -138,7 +145,7 @@
                     <i class="fas fa-warehouse fa-3x text-muted opacity-50 mb-3"></i>
                     <h5 class="text-muted">No hay activos</h5>
                     <p class="text-muted small">
-                        <?php if (!empty($busqueda) || !empty($negocio_id) || !empty($region_id) || !empty($plaza_id) || !empty($usuario_id) || !empty($status)): ?>
+                        <?php if (!empty($busqueda) || !empty($negocio_id) || !empty($region_id) || !empty($plaza_id) || !empty($tienda_id) || !empty($usuario_id) || !empty($status)): ?>
                             No se encontraron resultados con los filtros aplicados.
                             <a href="index.php?vista=<?= htmlspecialchars($vista) ?>" class="text-decoration-none">Limpiar filtros</a>
                         <?php else: ?>

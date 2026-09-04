@@ -29,10 +29,10 @@ class Activo
         };
     }
 
-    private static function limpiarPlaca(?string $placa): ?string
+    private static function limpiarCodigoBarras(?string $valor): ?string
     {
-        $placa = trim((string) $placa);
-        return $placa === '' ? null : $placa;
+        $valor = trim((string) $valor);
+        return $valor === '' ? null : $valor;
     }
 
     public function obtenerTodosFiltrado(array $filtros = [], int $pagina = 1, int $porPagina = 20): array
@@ -40,6 +40,7 @@ class Activo
         $negocio_id       = $filtros['negocio_id']       ?? null;
         $region_id        = $filtros['region_id']        ?? null;
         $plaza_id         = $filtros['plaza_id']         ?? null;
+        $tienda_id        = $filtros['tienda_id']        ?? null;
         $usuario_id       = $filtros['usuario_id']       ?? null;
         $dispositivo_id   = $filtros['dispositivo_id']   ?? null;
         $stock_id         = $filtros['stock_id']         ?? null;
@@ -56,8 +57,9 @@ class Activo
                     LEFT JOIN stock       s   ON a.stock_id              = s.id
                     LEFT JOIN usuario     u   ON s.usuario_id            = u.id
                     LEFT JOIN bodega      b   ON s.bodega_id             = b.id
+                    LEFT JOIN tienda      ts  ON s.tienda_id             = ts.id
                     LEFT JOIN bodega_acceso_plaza bap ON bap.bodega_id   = b.id
-                    LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, bap.plaza_id, u.plaza_id) = p.id
+                    LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, ts.plaza_id, bap.plaza_id, u.plaza_id) = p.id
                     LEFT JOIN region      r   ON p.region_id             = r.id
                     LEFT JOIN negocio     n   ON r.negocio_id            = n.id
                     LEFT JOIN tienda      tu  ON a.tienda_uso_id         = tu.id
@@ -91,6 +93,12 @@ class Activo
                 $params[':plaza_id'] = $plaza_id;
             }
         }
+        if ($tienda_id) {
+            // Activo cuyo stock es el de esa tienda, o marcado en uso en ella.
+            $sqlBase .= ' AND (ts.id = :tienda_id OR a.tienda_uso_id = :tienda_id_b)';
+            $params[':tienda_id']   = $tienda_id;
+            $params[':tienda_id_b'] = $tienda_id;
+        }
         if ($dispositivo_id) {
             $sqlBase .= ' AND d.id = :dispositivo_id';
             $params[':dispositivo_id'] = $dispositivo_id;
@@ -115,12 +123,17 @@ class Activo
             $sqlBase .= " AND s.tipo = 'bodega'";
         }
         if ($busqueda) {
-            $sqlBase .= ' AND (a.serie LIKE :busqueda OR a.placa LIKE :busqueda
-                               OR mo.nombre LIKE :busqueda OR d.nombre LIKE :busqueda
-                               OR n.nombre LIKE :busqueda OR r.nombre LIKE :busqueda
-                               OR p.nombre LIKE :busqueda OR u.nombre LIKE :busqueda
-                               OR b.nombre LIKE :busqueda)';
-            $params[':busqueda'] = "%{$busqueda}%";
+            // Un placeholder por columna: los prepares nativos (EMULATE_PREPARES=false)
+            // no permiten reutilizar el mismo :nombre varias veces.
+            $cols = ['a.serie', 'a.codigo_barras', 'a.num_activo', 'mo.nombre', 'd.nombre',
+                     'n.nombre', 'r.nombre', 'p.nombre', 'u.nombre', 'b.nombre'];
+            $ors  = [];
+            foreach ($cols as $i => $col) {
+                $ph          = ":busq{$i}";
+                $ors[]       = "{$col} LIKE {$ph}";
+                $params[$ph] = "%{$busqueda}%";
+            }
+            $sqlBase .= ' AND (' . implode(' OR ', $ors) . ')';
         }
 
         // Total
@@ -134,7 +147,7 @@ class Activo
         $offset       = ($pagina - 1) * $porPagina;
 
         $sql = "SELECT
-                    a.id, a.serie, a.placa, a.modelo_id, a.status,
+                    a.id, a.serie, a.codigo_barras, a.num_activo, a.modelo_id, a.status,
                     a.procedencia_tienda_id, a.tienda_uso_id, a.stock_id,
                     a.fecha_alta, a.fecha_modificacion,
                     mo.nombre  AS modelo_nombre,
@@ -146,6 +159,8 @@ class Activo
                     u.nombre   AS usuario_nombre,
                     b.id       AS bodega_stock_id,
                     b.nombre   AS bodega_nombre,
+                    ts.id      AS tienda_stock_id,
+                    ts.nombre  AS tienda_stock_nombre,
                     p.id       AS plaza_id,
                     p.nombre   AS plaza_nombre,
                     r.nombre   AS region_nombre,
@@ -191,6 +206,8 @@ class Activo
                     u.nombre   AS usuario_nombre,
                     b.id       AS bodega_stock_id,
                     b.nombre   AS bodega_nombre,
+                    ts.id      AS tienda_stock_id,
+                    ts.nombre  AS tienda_stock_nombre,
                     p.id       AS plaza_id,
                     p.nombre   AS plaza_nombre,
                     r.nombre   AS region_nombre,
@@ -205,8 +222,9 @@ class Activo
                 LEFT JOIN stock       s   ON a.stock_id              = s.id
                 LEFT JOIN usuario     u   ON s.usuario_id            = u.id
                 LEFT JOIN bodega      b   ON s.bodega_id             = b.id
+                LEFT JOIN tienda      ts  ON s.tienda_id             = ts.id
                 LEFT JOIN bodega_acceso_plaza bap ON bap.bodega_id   = b.id
-                LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, bap.plaza_id, u.plaza_id) = p.id
+                LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, ts.plaza_id, bap.plaza_id, u.plaza_id) = p.id
                 LEFT JOIN region      r   ON p.region_id             = r.id
                 LEFT JOIN negocio     n   ON r.negocio_id            = n.id
                 LEFT JOIN tienda      tu  ON a.tienda_uso_id         = tu.id
@@ -224,22 +242,53 @@ class Activo
         return (int) $this->conn->lastInsertId();
     }
 
+    /**
+     * Activos que actualmente están EN USO en una tienda (stock de esa tienda)
+     * y son del mismo tipo de dispositivo. Alimenta el selector "¿Reemplaza a?".
+     */
+    public function enTiendaPorDispositivo(int $tiendaId, int $dispositivoId, ?int $exceptoId = null): array
+    {
+        $sql = "SELECT a.id, a.serie, a.codigo_barras, a.modelo_id,
+                       mo.nombre AS modelo_nombre,
+                       d.id      AS dispositivo_id,
+                       d.nombre  AS dispositivo_nombre
+                FROM {$this->table} a
+                JOIN stock       s  ON s.id = a.stock_id
+                LEFT JOIN modelo mo ON mo.id = a.modelo_id
+                LEFT JOIN dispositivo d ON d.id = mo.dispositivo_id
+                WHERE s.tipo = 'tienda'
+                  AND s.tienda_id = :tienda_id
+                  AND d.id = :dispositivo_id
+                  AND a.status = 'en_uso'";
+        $params = [':tienda_id' => $tiendaId, ':dispositivo_id' => $dispositivoId];
+        if ($exceptoId) {
+            $sql .= ' AND a.id <> :excepto';
+            $params[':excepto'] = $exceptoId;
+        }
+        $sql .= ' ORDER BY mo.nombre, a.serie';
+
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
         public function crear(array $datos): bool
     {
         // Campos base obligatorios/por defecto
         $campos = [
-            'serie', 'placa', 'modelo_id', 'status',
+            'serie', 'codigo_barras', 'num_activo', 'modelo_id', 'status',
             'procedencia_tienda_id', 'tienda_uso_id', 'stock_id'
         ];
 
         $placeholders = [
-            ':serie', ':placa', ':modelo_id', ':status',
+            ':serie', ':codigo_barras', ':num_activo', ':modelo_id', ':status',
             ':procedencia_tienda_id', ':tienda_uso_id', ':stock_id'
         ];
 
         $params = [
             ':serie'                 => trim($datos['serie'] ?? ''),
-            ':placa'                 => self::limpiarPlaca($datos['placa'] ?? null),
+            ':codigo_barras'                 => self::limpiarCodigoBarras($datos['codigo_barras'] ?? null),
+            ':num_activo'                    => self::limpiarCodigoBarras($datos['num_activo'] ?? null),
             ':modelo_id'             => !empty($datos['modelo_id'])             ? (int) $datos['modelo_id']             : null,
             ':status'                => self::normalizarStatus($datos['status'] ?? 'en_bodega'),
             ':procedencia_tienda_id' => !empty($datos['procedencia_tienda_id']) ? (int) $datos['procedencia_tienda_id'] : null,
@@ -271,7 +320,8 @@ class Activo
     {
         $campos = [
             'serie                 = :serie',
-            'placa                 = :placa',
+            'codigo_barras         = :codigo_barras',
+            'num_activo            = :num_activo',
             'modelo_id             = :modelo_id',
             'status                = :status',
             'procedencia_tienda_id = :procedencia_tienda_id',
@@ -282,7 +332,8 @@ class Activo
         $params = [
             ':id'                    => (int) $datos['id'],
             ':serie'                 => trim($datos['serie'] ?? ''),
-            ':placa'                 => self::limpiarPlaca($datos['placa'] ?? null),
+            ':codigo_barras'                 => self::limpiarCodigoBarras($datos['codigo_barras'] ?? null),
+            ':num_activo'                    => self::limpiarCodigoBarras($datos['num_activo'] ?? null),
             ':modelo_id'             => !empty($datos['modelo_id'])             ? (int) $datos['modelo_id']             : null,
             ':status'                => self::normalizarStatus($datos['status'] ?? 'en_bodega'),
             ':procedencia_tienda_id' => !empty($datos['procedencia_tienda_id']) ? (int) $datos['procedencia_tienda_id'] : null,

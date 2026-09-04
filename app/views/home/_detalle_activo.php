@@ -33,8 +33,13 @@ $statusLabel = match($activo['status'] ?? '') {
         <strong><?= htmlspecialchars($activo['serie'] ?? '—') ?></strong>
     </div>
     <div class="col-6">
-        <small class="text-muted d-block">Placa / Activo Fijo</small>
-        <strong><?= htmlspecialchars($activo['placa'] ?? '—') ?></strong>
+        <small class="text-muted d-block">Código de barras</small>
+        <strong><?= htmlspecialchars($activo['codigo_barras'] ?? '—') ?></strong>
+    </div>
+
+    <div class="col-6">
+        <small class="text-muted d-block">N° de activo</small>
+        <strong><?= htmlspecialchars($activo['num_activo'] ?? '—') ?></strong>
     </div>
 
     <div class="col-6">
@@ -63,17 +68,16 @@ $statusLabel = match($activo['status'] ?? '') {
         <hr class="my-1">
     </div>
 
+    <?php
+    [$stockLbl, $stockVal] = match ($activo['stock_tipo'] ?? '') {
+        'usuario' => ['Asignado a', $activo['usuario_nombre'] ?? '—'],
+        'tienda'  => ['Stock de tienda', $activo['tienda_stock_nombre'] ?? '—'],
+        default   => ['Bodega', $activo['bodega_nombre'] ?? '—'],
+    };
+    ?>
     <div class="col-6">
-        <small class="text-muted d-block">
-            <?= $activo['stock_tipo'] === 'usuario' ? 'Asignado a' : 'Bodega' ?>
-        </small>
-        <strong>
-            <?= htmlspecialchars(
-                $activo['stock_tipo'] === 'usuario'
-                    ? ($activo['usuario_nombre'] ?? '—')
-                    : ($activo['bodega_nombre']  ?? '—')
-            ) ?>
-        </strong>
+        <small class="text-muted d-block"><?= $stockLbl ?></small>
+        <strong><?= htmlspecialchars($stockVal) ?></strong>
     </div>
     <?php if (!empty($activo['tienda_uso_nombre'])): ?>
         <div class="col-6">
@@ -106,3 +110,52 @@ $statusLabel = match($activo['status'] ?? '') {
         <strong>#<?= str_pad($activo['id'], 4, '0', STR_PAD_LEFT) ?></strong>
     </div>
 </div>
+
+<?php if (!empty($movimientos)): ?>
+    <hr class="my-3">
+    <h6 class="mb-2"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Línea de tiempo</h6>
+    <?php
+    $etiquetas = \App\Models\Movimiento::EVENTOS;
+    $colorEvt = [
+        'alta' => 'success', 'cambio_status' => 'primary', 'cambio_stock' => 'info',
+        'reemplazo_entra' => 'success', 'reemplazo_sale' => 'warning text-dark',
+        'edicion' => 'secondary', 'baja' => 'danger', 'eliminacion' => 'dark',
+    ];
+    ?>
+    <ul class="list-group list-group-flush small">
+        <?php foreach ($movimientos as $m): ?>
+            <li class="list-group-item px-0 py-2">
+                <div class="d-flex justify-content-between">
+                    <span class="badge bg-<?= $colorEvt[$m['evento']] ?? 'secondary' ?>">
+                        <?= htmlspecialchars($etiquetas[$m['evento']] ?? $m['evento']) ?>
+                    </span>
+                    <span class="text-muted"><?= htmlspecialchars($m['creado_en'] ?? '') ?></span>
+                </div>
+                <div class="mt-1">
+                    <?php if (!empty($m['status_anterior']) || !empty($m['status_nuevo'])): ?>
+                        <div>Estatus:
+                            <strong><?= htmlspecialchars($m['status_anterior'] ?? '—') ?></strong>
+                            &rarr; <strong><?= htmlspecialchars($m['status_nuevo'] ?? '—') ?></strong>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($m['stock_new_nombre']) && ($m['stock_ant_nombre'] ?? null) !== ($m['stock_new_nombre'] ?? null)): ?>
+                        <div>Stock:
+                            <strong><?= htmlspecialchars($m['stock_ant_nombre'] ?? '—') ?></strong>
+                            &rarr; <strong><?= htmlspecialchars($m['stock_new_nombre']) ?></strong>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (!empty($m['relacionado_serie'])): ?>
+                        <div>Relacionado con serie <strong><?= htmlspecialchars($m['relacionado_serie']) ?></strong></div>
+                    <?php endif; ?>
+                    <?php if (!empty($m['tienda_nombre'])): ?>
+                        <div>Tienda: <strong><?= htmlspecialchars($m['tienda_nombre']) ?></strong></div>
+                    <?php endif; ?>
+                    <?php if (!empty($m['nota'])): ?>
+                        <div class="text-muted fst-italic"><?= htmlspecialchars($m['nota']) ?></div>
+                    <?php endif; ?>
+                    <div class="text-muted">Por: <?= htmlspecialchars($m['actor_nombre'] ?? 'Sistema') ?></div>
+                </div>
+            </li>
+        <?php endforeach; ?>
+    </ul>
+<?php endif; ?>

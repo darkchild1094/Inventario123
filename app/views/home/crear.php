@@ -198,16 +198,21 @@ foreach ($usuarios as $u) {
                             </select>
                         </div>
 
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label text-primary">Serie <span class="text-danger">*</span></label>
                             <input type="text" name="serie" id="campo_serie"
                                    class="form-control border-primary" required autofocus
                                    placeholder="Escanee o escriba la serie...">
                         </div>
 
-                        <div class="col-md-6">
-                            <label class="form-label">Placa / Activo Fijo</label>
-                            <input type="text" name="placa" class="form-control" placeholder="Opcional">
+                        <div class="col-md-4">
+                            <label class="form-label">Código de barras</label>
+                            <input type="text" name="codigo_barras" class="form-control" placeholder="Opcional">
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label">N° de activo</label>
+                            <input type="text" name="num_activo" class="form-control" placeholder="Opcional">
                         </div>
 
                     </div>
@@ -259,12 +264,64 @@ foreach ($usuarios as $u) {
                             <label class="form-label text-success fw-bold">
                                 <i class="fas fa-store me-1"></i> Tienda en uso <span class="text-danger">*</span>
                             </label>
-                            <select name="tienda_uso_id" id="select_tienda_uso" class="form-select">
+                            <select name="tienda_uso_id" id="select_tienda_uso" class="form-select"
+                                    onchange="cargarReemplazos()">
                                 <option value="">Seleccione tienda...</option>
                                 <?php foreach ($tiendasPlaza as $t): ?>
                                     <option value="<?= $t['id'] ?>"><?= htmlspecialchars($t['nombre']) ?></option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+
+                        <!-- ¿REEMPLAZA A? -->
+                        <div class="col-md-6 campo-condicional" id="campo_reemplazo">
+                            <label class="form-label text-warning fw-bold">
+                                <i class="fas fa-right-left me-1"></i> ¿Reemplaza a?
+                            </label>
+                            <select name="reemplaza_activo_id" id="select_reemplazo" class="form-select"
+                                    onchange="manejarReemplazo()">
+                                <option value="">— Ninguno (equipo adicional) —</option>
+                            </select>
+                            <small class="text-muted">Elige qué activo SALE de la tienda en su lugar.</small>
+                        </div>
+
+                        <!-- EQUIPO QUE SALE -->
+                        <div class="col-12 campo-condicional" id="campo_salida">
+                            <div class="border rounded p-3 bg-light">
+                                <label class="form-label fw-bold mb-2">
+                                    <i class="fas fa-box-open me-1"></i> Equipo que sale — destino
+                                </label>
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <select name="salida_destino" id="salida_destino" class="form-select"
+                                                onchange="manejarSalida()">
+                                            <option value="asignado" selected>Asignar a usuario</option>
+                                            <option value="en_bodega">Enviar a bodega</option>
+                                            <option value="garantia">Garantía</option>
+                                            <option value="baja">Baja</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-5" id="salida_usuario_wrap">
+                                        <select name="salida_usuario_id" id="salida_usuario_id" class="form-select"></select>
+                                    </div>
+                                    <div class="col-md-5 d-none" id="salida_ati_wrap">
+                                        <select name="salida_ati_usuario_id" id="salida_ati_usuario_id" class="form-select">
+                                            <option value="">ATI de la tienda (automático)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ATI RESPONSABLE (garantía / baja) -->
+                        <div class="col-md-6 campo-condicional" id="campo_ati">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-user-shield me-1"></i> ATI responsable
+                            </label>
+                            <select name="ati_usuario_id" id="select_ati" class="form-select">
+                                <option value="">ATI de la tienda (automático)</option>
+                            </select>
+                            <small class="text-muted">Garantía y baja quedan en el stock de este ATI.</small>
                         </div>
 
                         <!-- INFO BODEGA (fs/ati al elegir en_bodega) ───────────────── -->
@@ -336,6 +393,73 @@ const BODEGA_OXXO = '<?= !empty($bodegaOxxo['id']) ? 'bodega_' . $bodegaOxxo['id
 // (BARA, OXXO, o la que sea). Debe usarse SIEMPRE con prioridad sobre BODEGA_OXXO.
 const BODEGA_NEGOCIO_SELECCIONADO = '<?= !empty($bodegaPorNegocio['id']) ? 'bodega_' . $bodegaPorNegocio['id'] : '' ?>';
 const BODEGA_DEFAULT = BODEGA_NEGOCIO_SELECCIONADO || BODEGA_OXXO;
+const PLAZA_ID       = <?= (int)$plazaId ?>;
+const ACTIVO_ID      = 0;
+const USUARIOS_PLAZA = <?= json_encode(array_map(fn($u) => ['id' => (int)$u['id'], 'nombre' => $u['nombre'], 'tipo' => $u['tipo']], $usuariosPlaza), JSON_UNESCAPED_UNICODE) ?>;
+
+// ── Reemplazo: activos del mismo dispositivo ya en la tienda elegida ──
+async function cargarReemplazos() {
+    const est    = document.getElementById('estatus').value;
+    const tienda = document.getElementById('select_tienda_uso');
+    const disp   = document.getElementById('dispositivo');
+    const cRe    = document.getElementById('campo_reemplazo');
+    const sRe    = document.getElementById('select_reemplazo');
+    if (!cRe || !sRe) return;
+    if (est !== 'en_uso' || !tienda || !tienda.value || !disp || !disp.value) {
+        cRe.style.display = 'none'; sRe.value = ''; manejarReemplazo(); return;
+    }
+    try {
+        const r = await fetch(`index.php?controller=api&action=obtenerActivosEnTiendaPorDispositivo&tienda_id=${tienda.value}&dispositivo_id=${disp.value}&excepto_id=${ACTIVO_ID}`);
+        const data = await r.json();
+        sRe.innerHTML = '<option value="">— Ninguno (equipo adicional) —</option>';
+        (data || []).forEach(a => sRe.appendChild(new Option(`${a.modelo_nombre || ''} · ${a.serie}`, a.id)));
+        cRe.style.display = (data && data.length) ? 'block' : 'none';
+    } catch (e) { cRe.style.display = 'none'; }
+    manejarReemplazo();
+}
+
+function manejarReemplazo() {
+    const sRe = document.getElementById('select_reemplazo');
+    const cSal = document.getElementById('campo_salida');
+    if (cSal) cSal.style.display = (sRe && sRe.value) ? 'block' : 'none';
+    if (sRe && sRe.value) { poblarSalidaUsuarios(); manejarSalida(); }
+}
+
+function poblarSalidaUsuarios() {
+    const sel = document.getElementById('salida_usuario_id');
+    if (!sel || sel.dataset.listo) return;
+    sel.innerHTML = '';
+    if (ES_FS) {
+        sel.appendChild(new Option('Yo mismo', USUARIO_ACTUAL));
+    } else {
+        USUARIOS_PLAZA.forEach(u => sel.appendChild(new Option(`${u.nombre} (${u.tipo.toUpperCase()})`, u.id)));
+    }
+    sel.value = USUARIO_ACTUAL;
+    sel.dataset.listo = '1';
+}
+
+function manejarSalida() {
+    const dest = document.getElementById('salida_destino').value;
+    const uw = document.getElementById('salida_usuario_wrap');
+    const aw = document.getElementById('salida_ati_wrap');
+    if (uw) uw.classList.toggle('d-none', dest !== 'asignado');
+    if (aw) aw.classList.toggle('d-none', dest !== 'garantia' && dest !== 'baja');
+}
+
+async function cargarAtis() {
+    if (!PLAZA_ID) return;
+    try {
+        const r = await fetch(`index.php?controller=api&action=obtenerAtisPorPlaza&plaza_id=${PLAZA_ID}`);
+        const data = await r.json();
+        ['select_ati', 'salida_ati_usuario_id'].forEach(id => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            const primera = sel.options[0];
+            sel.innerHTML = ''; sel.appendChild(primera);
+            (data || []).forEach(u => sel.appendChild(new Option(u.nombre, u.id)));
+        });
+    } catch (e) { /* noop */ }
+}
 
 function cargarModelos() {
     const dispId = document.getElementById('dispositivo').value;
@@ -367,12 +491,19 @@ function manejarEstatus() {
 
     const stockDestinoHidden = document.getElementById('stock_destino_hidden');
 
+    const cAti    = document.getElementById('campo_ati');
+    const cReempl = document.getElementById('campo_reemplazo');
+    const cSalida = document.getElementById('campo_salida');
+
     // Reset: ocultar todo, quitar required, limpiar stock_destino cuando no sea bodega
-    [cAsig, cTienda, cBodega, cStockDst].forEach(el => { if (el) el.style.display = 'none'; });
+    [cAsig, cTienda, cBodega, cStockDst, cAti, cReempl, cSalida].forEach(el => { if (el) el.style.display = 'none'; });
     if (sTienda)   sTienda.required = false;
     if (sAsig)     sAsig.required   = false;
     if (sStockDst) sStockDst.value  = '';
     if (stockDestinoHidden && !BODEGA_DEFAULT) stockDestinoHidden.value = '';
+
+    if ((est === 'garantia' || est === 'baja') && cAti) cAti.style.display = 'block';
+    if (est === 'en_uso') setTimeout(cargarReemplazos, 0);
 
     if (stockDestinoHidden && est !== 'en_bodega') {
         stockDestinoHidden.value = '';
@@ -442,7 +573,10 @@ document.addEventListener('keydown', e => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+    cargarAtis();
     manejarEstatus();
+    const disp = document.getElementById('dispositivo');
+    if (disp) disp.addEventListener('change', () => setTimeout(cargarReemplazos, 300));
     const serie = document.getElementById('campo_serie');
     if (document.querySelector('.alert-success')) {
         if (serie) { serie.value = ''; serie.focus(); }
@@ -452,7 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Envío por AJAX: no recarga la página, conserva negocio/plaza/dispositivo/
-//    modelo/estatus/asignación tal cual quedaron, y solo limpia serie, placa
+//    modelo/estatus/asignación tal cual quedaron, y solo limpia serie, código
 //    y procedencia para registrar el siguiente activo más rápido. ──────────
 (function () {
     const form = document.getElementById('formActivo');
@@ -488,8 +622,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const serie = document.getElementById('campo_serie');
         if (serie) serie.value = '';
 
-        const placa = form.querySelector('[name="placa"]');
-        if (placa) placa.value = '';
+        const codBarras = form.querySelector('[name="codigo_barras"]');
+        if (codBarras) codBarras.value = '';
 
         const procedencia = form.querySelector('[name="procedencia_tienda_id"]');
         if (procedencia) procedencia.value = '';

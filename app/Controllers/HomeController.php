@@ -13,6 +13,9 @@ use App\Models\Usuario;
 use App\Models\Bodega;
 use App\Models\Stock;
 use App\Models\Area;
+use App\Models\Movimiento;
+use App\Services\ActivoGuardado;
+use App\Services\MovimientoService;
 use App\Helpers\Permisos;
 
 class HomeController
@@ -59,6 +62,7 @@ class HomeController
             $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
             $filtros['plaza_id']   = $_GET['plaza_id']   ?? null;
             $filtros['region_id']  = $_GET['region_id']  ?? null;
+            $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
             $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
         } elseif ($tipo === 'coordinador') {
             // Coordinador puede tener VARIAS plazas asignadas (incluso de negocios
@@ -71,6 +75,7 @@ class HomeController
                 : $misPlazas;
             $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
             $filtros['region_id']  = $_GET['region_id']  ?? null;
+            $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
             $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
         } elseif ($tipo === 'ati') {
             // ati: siempre su única plaza, ignorar ?plaza_id de URL
@@ -105,6 +110,7 @@ class HomeController
         $negocio_id     = $filtros['negocio_id']     ?? null;
         $plaza_id       = $filtros['plaza_id']       ?? null;
         $region_id      = $filtros['region_id']      ?? null;
+        $tienda_id      = $filtros['tienda_id']      ?? null;
         $usuario_id     = $filtros['usuario_id']     ?? null;
         $dispositivo_id = $filtros['dispositivo_id'] ?? null;
         $status         = $filtros['status']         ?? null;
@@ -116,6 +122,7 @@ class HomeController
             $plazas         = (new Plaza($this->db))->obtenerTodas();
             $regiones       = (new Region($this->db))->obtenerTodas();
             $usuariosFiltro = (new Usuario($this->db))->obtenerTodos();
+            $tiendasFiltro  = (new Tienda($this->db))->obtenerTodas();
         } elseif ($tipo === 'coordinador') {
             // Coordinador: solo SUS plazas asignadas, que pueden pertenecer
             // a negocios distintos (ej. Valles-OXXO y León-BARA).
@@ -160,11 +167,18 @@ class HomeController
                 }
             }
             $usuariosFiltro = array_values($usuariosFiltro);
+
+            // Tiendas de sus plazas asignadas
+            $tiendasFiltro = array_values(array_filter(
+                (new Tienda($this->db))->obtenerTodas(),
+                fn($t) => in_array((int) $t['plaza_id'], $misPlazasIds, true)
+            ));
         } else {
             $negocios       = [];
             $plazas         = [];
             $regiones       = [];
             $usuariosFiltro = [];
+            $tiendasFiltro  = [];
         }
 
         // ── Respuesta AJAX: solo el fragmento de resultados, sin recargar ──────
@@ -241,240 +255,65 @@ class HomeController
         Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') $this->redirigir('index.php');
 
-        $activoModel = new Activo($this->db);
-        $stockModel  = new Stock($this->db);
-        $datos       = $this->datosDesdePost();
-        $tipo        = Permisos::tipo();
-        $plazaId     = max(0, (int) ($_POST['plaza_id'] ?? $_SESSION['usuario']['plaza_id'] ?? 0));
+        $datos         = $this->datosDesdePost();
+        $negocioIdPost = (int) ($_POST['negocio_id'] ?? 0);
+        $plazaId       = $this->resolverPlazaFormulario($negocioIdPost);
+        $redirectCrear = 'index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId;
 
+        // Imágenes
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
+        $datos = array_merge($datos, $fotos);
+
+        // Toda la resolución de stock + bitácora + reemplazo vive en el servicio.
+        $post = array_merge($_POST, ['plaza_id' => $plazaId]);
+        $res  = (new ActivoGuardado($this->db))->crear($datos, $post, $this->actorSesion());
+
+        $_SESSION[$res['ok'] ? 'success' : 'error'] = $res['ok']
+            ? 'Activo registrado con éxito.'
+            : ($res['error'] ?? 'No se pudo registrar el activo.');
+        $this->redirigir($redirectCrear);
+    }
+
+    /** Datos del usuario en sesión que necesitan los servicios de guardado. */
+    private function actorSesion(): array
+    {
+        return [
+            'id'       => Permisos::idUsuario(),
+            'tipo'     => Permisos::tipo(),
+            'plazas'   => array_map('intval', $_SESSION['usuario']['plaza_ids'] ?? []),
+            'plaza_id' => Permisos::plazaId(),
+        ];
+    }
+
+    /**
+     * Resuelve la plaza de trabajo del formulario multi-negocio: si la plaza
+     * posteada no pertenece al negocio elegido (form desincronizado), busca una
+     * plaza del usuario que sí corresponda a ese negocio.
+     */
+    private function resolverPlazaFormulario(int $negocioIdPost): int
+    {
+        $plazaId       = max(0, (int) ($_POST['plaza_id'] ?? $_SESSION['usuario']['plaza_id'] ?? 0));
         $usuarioPlazas = $_SESSION['usuario']['plazas'] ?? [];
+
         if ($usuarioPlazas) {
-            $plazaIds = array_column($usuarioPlazas, 'id');
+            $plazaIds = array_map('intval', array_column($usuarioPlazas, 'id'));
             if ($plazaId <= 0 || !in_array($plazaId, $plazaIds, true)) {
                 $plazaId = (int) $usuarioPlazas[0]['id'];
             }
         }
 
-        // ── Default de asignado y bodega OXXO para la creación ──────────────
-        $statusPost       = Activo::normalizarStatus($_POST['status'] ?? 'en_bodega');
-        $stockDestino     = trim((string) ($_POST['stock_destino'] ?? ''));
-        $stockDestinoDef  = trim((string) ($_POST['stock_destino_default'] ?? ''));
-
-        if ($statusPost === 'asignado' && empty($_POST['asignado_usuario_id'])) {
-            $_POST['asignado_usuario_id'] = Permisos::idUsuario();
-        }
-
-        if (empty($stockDestino) && !empty($stockDestinoDef)) {
-            $stockDestino = $stockDestinoDef;
-        }
-
-        // Determinar negocio seleccionado desde el formulario (si aplica)
-        $negocioIdPost = (int) ($_POST['negocio_id'] ?? 0);
-
-        // --- VALIDACIÓN CRÍTICA: plaza_id y negocio_id deben ser consistentes ---
-        // Si el formulario llegó desincronizado (ej. el <select> de negocio se
-        // cambió visualmente pero el campo oculto plaza_id no se actualizó por
-        // algún motivo del navegador), NO confiamos en plaza_id a ciegas.
-        // Verificamos que la plaza recibida realmente pertenezca al negocio
-        // recibido; si no, se corrige usando las plazas del usuario.
         if ($negocioIdPost > 0 && $plazaId > 0) {
             $plazaCheck = (new Plaza($this->db))->obtenerPorId($plazaId);
             if ($plazaCheck && (int) ($plazaCheck['negocio_id'] ?? 0) !== $negocioIdPost) {
-                $plazaCorrecta = null;
                 foreach ($usuarioPlazas as $p) {
                     $pFull = (new Plaza($this->db))->obtenerPorId((int) $p['id']);
                     if ($pFull && (int) ($pFull['negocio_id'] ?? 0) === $negocioIdPost) {
-                        $plazaCorrecta = $pFull;
-                        break;
+                        return (int) $pFull['id'];
                     }
                 }
-                if ($plazaCorrecta) {
-                    $plazaId = (int) $plazaCorrecta['id'];
-                } else {
-                    $_SESSION['error'] = 'La plaza enviada no corresponde al negocio seleccionado. Verifica tu selección e inténtalo de nuevo.';
-                    $this->redirigir('index.php?action=crear&negocio_id=' . $negocioIdPost);
-                }
             }
         }
-
-        $negocioSel = (new Negocio($this->db))->obtenerPorId($negocioIdPost);
-        $bodegaNegocioPost = null;
-        if ($negocioSel) {
-            $bodegaNegocioPost = (new Bodega($this->db))->obtenerPorPlazaYNegocio($plazaId, $negocioSel['nombre']);
-        }
-
-        $bodegaOxxo = (new Bodega($this->db))->obtenerPorPlazaYNegocio($plazaId, 'oxxo');
-        if (in_array($tipo, ['admin', 'coordinador']) && $statusPost === 'en_bodega' && empty($stockDestino)) {
-            // Priorizar bodega por negocio+plaza, luego OXXO
-            if (!empty($bodegaNegocioPost)) {
-                $stockDestino = 'bodega_' . $bodegaNegocioPost['id'];
-            } elseif (!empty($bodegaOxxo)) {
-                $stockDestino = 'bodega_' . $bodegaOxxo['id'];
-            }
-        }
-
-        // --- Determinar la bodega seleccionada/default de forma centralizada ---
-        $bodegaSeleccionada = null;
-        // Si el admin/coordinador especificó un destino explícito (stock_destino)
-        if (!empty($stockDestino) && str_starts_with($stockDestino, 'bodega_')) {
-            $id_dest_bodega = (int) explode('_', $stockDestino, 2)[1];
-            $cand = (new Bodega($this->db))->obtenerPorId($id_dest_bodega);
-            if ($cand) {
-                // coordinador: validar acceso a plaza
-                if ($tipo === 'coordinador') {
-                    $plazasDeBodega = (new Bodega($this->db))->obtenerPlazasDeBodega($id_dest_bodega);
-                    $plazaIdsAcceso = array_map('intval', array_column($plazasDeBodega, 'id'));
-                    if (!in_array((int)$plazaId, $plazaIdsAcceso, true)) {
-                        $_SESSION['error'] = 'La bodega seleccionada no pertenece a la plaza elegida.';
-                        $this->redirigir('index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId);
-                    }
-                }
-                $bodegaSeleccionada = $cand;
-            }
-        }
-
-        // Si no hay bodega seleccionada por el usuario, tratar de obtener por negocio+plaza
-        if ($bodegaSeleccionada === null) {
-            $negocioIdPost = (int) ($_POST['negocio_id'] ?? 0);
-            if ($negocioIdPost > 0) {
-                $negocioSel = (new Negocio($this->db))->obtenerPorId($negocioIdPost);
-                if ($negocioSel) {
-                    $cand = (new Bodega($this->db))->obtenerPorPlazaYNegocio($plazaId, $negocioSel['nombre']);
-                    if ($cand) $bodegaSeleccionada = $cand;
-                }
-            }
-        }
-
-        // Si aún no hay bodega, usar la bodega asignada a la plaza
-        if ($bodegaSeleccionada === null) {
-            $cand = (new Bodega($this->db))->obtenerPorPlaza($plazaId);
-            if ($cand) $bodegaSeleccionada = $cand;
-        }
-
-        // Por último intentar OXXO
-        if ($bodegaSeleccionada === null && !empty($bodegaOxxo)) {
-            $bodegaSeleccionada = $bodegaOxxo;
-        }
-
-        if ($tipo === 'fs') {
-            // fs: asignado/en_uso → stock personal (scopeado a la plaza/negocio elegido) | en_bodega/garantia/baja → bodega de la plaza seleccionada
-            if ($statusPost === 'en_uso' || $statusPost === 'asignado') {
-                $stock = $stockModel->obtenerPorUsuario(Permisos::idUsuario(), $plazaId);
-            } else {
-                $bodega = (new Bodega($this->db))->obtenerPorPlaza($plazaId);
-                $stock  = $bodega ? $stockModel->obtenerPorBodega((int)$bodega['id']) : null;
-                if ($stock && isset($stock['bodega_id']) && (int)$stock['bodega_id'] !== (int)($bodega['id'] ?? 0)) {
-                    $stockModel->crearParaBodega((int)($bodega['id'] ?? 0));
-                    $stock = $stockModel->obtenerPorBodega((int)($bodega['id'] ?? 0));
-                }
-            }
-            $datos['stock_id'] = $stock ? $stock['id'] : null;
-
-        } elseif ($tipo === 'ati') {
-            // ati: 'asignado' SÍ puede dirigirse a otro usuario de su plaza (tiene
-            // selector visible en el formulario, a diferencia de fs). 'en_uso'
-            // se queda en el stock personal del propio ati (sigue siendo su equipo,
-            // solo que desplegado en una tienda). 'en_bodega'/'garantia'/'baja'
-            // van a la bodega de la plaza seleccionada.
-            if ($statusPost === 'asignado') {
-                $asignadoUsuarioId = (int) ($_POST['asignado_usuario_id'] ?? 0) ?: Permisos::idUsuario();
-
-                if ($asignadoUsuarioId !== Permisos::idUsuario()) {
-                    $usuarioAsignado = (new Usuario($this->db))->obtenerPorId($asignadoUsuarioId);
-                    if (!$usuarioAsignado || !(new Usuario($this->db))->perteneceAPlaza($asignadoUsuarioId, $plazaId)) {
-                        $_SESSION['error'] = 'Solo puedes asignar activos a usuarios de la plaza seleccionada.';
-                        $this->redirigir('index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId);
-                    }
-                }
-
-                $stock = $stockModel->obtenerPorUsuario($asignadoUsuarioId, $plazaId);
-            } elseif ($statusPost === 'en_uso') {
-                $stock = $stockModel->obtenerPorUsuario(Permisos::idUsuario(), $plazaId);
-            } else {
-                $bodega = (new Bodega($this->db))->obtenerPorPlaza($plazaId);
-                $stock  = $bodega ? $stockModel->obtenerPorBodega((int)$bodega['id']) : null;
-                if ($stock && isset($stock['bodega_id']) && (int)$stock['bodega_id'] !== (int)($bodega['id'] ?? 0)) {
-                    $stockModel->crearParaBodega((int)($bodega['id'] ?? 0));
-                    $stock = $stockModel->obtenerPorBodega((int)($bodega['id'] ?? 0));
-                }
-            }
-            $datos['stock_id'] = $stock ? $stock['id'] : null;
-
-        } elseif ($statusPost === 'asignado' && !empty($_POST['asignado_usuario_id'])) {
-            $asignadoUsuarioId = (int) $_POST['asignado_usuario_id'];
-            if ($tipo !== 'admin') {
-                $usuarioAsignado = (new Usuario($this->db))->obtenerPorId($asignadoUsuarioId);
-                if (!$usuarioAsignado || !(new Usuario($this->db))->perteneceAPlaza($asignadoUsuarioId, $plazaId)) {
-                    $_SESSION['error'] = 'Solo puedes asignar activos a usuarios de la plaza seleccionada.';
-                    $this->redirigir('index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId);
-                }
-            }
-            // Asignado a usuario específico (stock scopeado a la plaza/negocio elegido)
-            $stock = $stockModel->obtenerPorUsuario($asignadoUsuarioId, $plazaId);
-            $datos['stock_id'] = $stock ? $stock['id'] : null;
-
-        } elseif (!empty($stockDestino)) {
-            // Admin/coordinador eligió destino manual o se aplicó OXXO por defecto
-            [$tipo_dest, $id_dest] = explode('_', $stockDestino, 2);
-            if ($tipo_dest === 'bodega') {
-                if ($tipo === 'coordinador') {
-                    // Verificar que la bodega tenga acceso a la plaza seleccionada
-                    $bodegasModel = new Bodega($this->db);
-                    $plazasDeBodega = $bodegasModel->obtenerPlazasDeBodega((int)$id_dest);
-                    $plazaIdsAcceso = array_map('intval', array_column($plazasDeBodega, 'id'));
-                    if (!in_array((int)$plazaId, $plazaIdsAcceso, true)) {
-                        $_SESSION['error'] = 'La bodega seleccionada no pertenece a la plaza elegida.';
-                        $this->redirigir('index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId);
-                    }
-                }
-                $stock = $stockModel->obtenerPorBodega((int)$id_dest);
-                // Asegurar que el stock devuelto pertenece a la bodega esperada
-                if ($stock && isset($stock['bodega_id']) && (int)$stock['bodega_id'] !== (int)$id_dest) {
-                    // Intentar crear/recuperar el stock correcto para esa bodega
-                    $stockModel->crearParaBodega((int)$id_dest);
-                    $stock = $stockModel->obtenerPorBodega((int)$id_dest);
-                }
-            } else {
-                $stock = $stockModel->obtenerPorUsuario((int)$id_dest, $plazaId);
-            }
-            $datos['stock_id'] = $stock ? $stock['id'] : null;
-
-        } else {
-            // Por defecto: bodega de la plaza seleccionada
-            $bodega = (new Bodega($this->db))->obtenerPorPlaza($plazaId);
-            if ($bodega) {
-                $stock = $stockModel->obtenerPorBodega((int)$bodega['id']);
-                $datos['stock_id'] = $stock ? $stock['id'] : null;
-            }
-        }
-
-        if (empty($datos['stock_id'])) {
-            $_SESSION['error'] = 'No se pudo determinar el stock de destino. Verifique que su plaza tenga una bodega configurada.';
-            $this->redirigir('index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId);
-        }
-
-        // ── Procesamiento de Imágenes ─────────────────────────────────────
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(
-            ROOT_PATH . '/public/uploads',
-            null, // El ID se puede actualizar luego si es necesario, o dejarlo así
-            []
-        );
-        $datos = array_merge($datos, $fotos);
-
-        // IMPORTANTE: preservar negocio_id y plaza_id en la redirección.
-        // Si no se preservan, crear() vuelve a cargar el negocio/plaza por
-        // defecto (el primero de la lista, típicamente OXXO), y el usuario
-        // sigue registrando activos "asignado" ahí sin darse cuenta, aunque
-        // haya seleccionado otro negocio en el registro anterior.
-        $redirectCrear = 'index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId;
-
-        if ($activoModel->crear($datos)) {
-            $_SESSION['success'] = 'Activo registrado con éxito.';
-            $this->redirigir($redirectCrear);
-        } else {
-            $_SESSION['error'] = 'Error al guardar. Verifique que la serie no esté duplicada.';
-            $this->redirigir($redirectCrear);
-        }
+        return $plazaId;
     }
 
     // ── Editar ────────────────────────────────────────────────────────────────
@@ -514,92 +353,30 @@ class HomeController
         Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') $this->redirigir('index.php');
 
-        $id          = (int) ($_POST['id'] ?? 0);
-        $activoModel = new Activo($this->db);
-        $activo      = $activoModel->obtenerPorId($id);
+        $id     = (int) ($_POST['id'] ?? 0);
+        $antes  = (new Activo($this->db))->obtenerPorId($id);
 
-        // Verificar que fs/ati solo editan sus propios activos
-        if (Permisos::esFs() || Permisos::tipo() === 'ati') {
-            if (!$activo || !Permisos::puedeEditarActivoConcreto($activo)) {
-                $_SESSION['error'] = 'Solo puedes editar activos de tu propio stock.';
-                $this->redirigir('index.php');
-            }
-            $datos = array_merge(['id' => $id], $this->datosDesdePost());
-
-            if (Permisos::tipo() === 'ati'
-                && ($datos['status'] ?? '') === 'asignado'
-                && !empty($_POST['asignado_usuario_id'])
-            ) {
-                // ati SÍ puede reasignar el activo a otro usuario de su plaza al editar
-                // (igual que al crearlo), validando que pertenezca a esa misma plaza.
-                $asignadoUsuarioId = (int) $_POST['asignado_usuario_id'];
-                $plazaIdActivo     = (int) ($activo['plaza_id'] ?? Permisos::plazaId());
-
-                if ($asignadoUsuarioId !== Permisos::idUsuario()) {
-                    $usuarioAsignado = (new Usuario($this->db))->obtenerPorId($asignadoUsuarioId);
-                    if (!$usuarioAsignado || !(new Usuario($this->db))->perteneceAPlaza($asignadoUsuarioId, $plazaIdActivo)) {
-                        $_SESSION['error'] = 'Solo puedes asignar activos a usuarios de la plaza seleccionada.';
-                        $this->redirigir("index.php?action=editar&id={$id}");
-                    }
-                }
-
-                $stockNuevo = (new Stock($this->db))->obtenerPorUsuario($asignadoUsuarioId, $plazaIdActivo);
-                $datos['stock_id'] = $stockNuevo ? $stockNuevo['id'] : $activo['stock_id'];
-            } else {
-                // fs siempre, y ati para estatus distinto de 'asignado': no cambian el stock_id
-                $datos['stock_id'] = $activo['stock_id'];
-            }
-        } else {
-            $datos = array_merge(['id' => $id], $this->datosDesdePost());
+        if (!$antes || !Permisos::puedeEditarActivoConcreto($antes)) {
+            $_SESSION['error'] = 'Solo puedes editar activos de tu propio stock.';
+            $this->redirigir('index.php');
         }
 
-        // ── Blindaje: si el nuevo status es 'en_bodega', el stock JAMÁS debe
-        //    seguir apuntando al stock personal de un técnico. El campo oculto
-        //    stock_id del formulario de edición no se actualiza en JS para este
-        //    caso, así que lo resolvemos aquí de forma autoritativa. ─────────
-        if (($datos['status'] ?? '') === 'en_bodega') {
-            $plazaIdActivo = (int) ($activo['plaza_id'] ?? Permisos::plazaId());
-            $stockModel    = new Stock($this->db);
-            $bodegaModel   = new Bodega($this->db);
-            $bodegaDestino = null;
+        $datos = $this->datosDesdePost();
 
-            // Respetar un destino explícito si el admin/coordinador lo envió
-            $stockDestinoPost = trim((string) ($_POST['stock_destino'] ?? ''));
-            if ($stockDestinoPost !== '' && str_starts_with($stockDestinoPost, 'bodega_')) {
-                $idBodegaPost  = (int) explode('_', $stockDestinoPost, 2)[1];
-                $bodegaDestino = $bodegaModel->obtenerPorId($idBodegaPost);
-            }
-
-            // Si no hay destino explícito, usar la bodega de la plaza del activo
-            if (!$bodegaDestino) {
-                $bodegaDestino = $bodegaModel->obtenerPorPlaza($plazaIdActivo);
-            }
-
-            if ($bodegaDestino) {
-                $stockBodega = $stockModel->obtenerPorBodega((int) $bodegaDestino['id']);
-                if ($stockBodega) {
-                    $datos['stock_id'] = $stockBodega['id'];
-                }
-            }
-        }
-
-        // ── Procesamiento de Imágenes ─────────────────────────────────────
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(
-            ROOT_PATH . '/public/uploads',
-            $id,
-            $activo ?: []
-        );
-        
-        // Solo actualizar fotos que realmente se subieron
+        // Imágenes: solo se sobrescriben las que realmente se subieron.
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: []);
         foreach ($fotos as $key => $val) {
             if ($val !== null) $datos[$key] = $val;
         }
 
-        if ($activoModel->actualizar($datos)) {
+        $post = array_merge($_POST, ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())]);
+        $res  = (new ActivoGuardado($this->db))->actualizar($id, $datos, $antes, $post, $this->actorSesion());
+
+        if ($res['ok']) {
             $_SESSION['success'] = 'Activo actualizado con éxito.';
             $this->redirigir('index.php');
         } else {
-            $_SESSION['error'] = 'Error al actualizar. Verifique que la serie no esté duplicada.';
+            $_SESSION['error'] = $res['error'] ?? 'No se pudo actualizar el activo.';
             $this->redirigir("index.php?action=editar&id={$id}");
         }
     }
@@ -620,6 +397,7 @@ class HomeController
         }
 
         $activo['status'] = Activo::normalizarStatus($activo['status'] ?? 'en_bodega');
+        $movimientos      = (new Movimiento($this->db))->porActivo((int) $activo['id']);
 
         ob_start();
         require ROOT_PATH . '/app/views/home/_detalle_activo.php';
@@ -648,6 +426,9 @@ class HomeController
                 $_SESSION['error'] = 'No tienes permiso para eliminar este activo.';
                 $this->redirigir('index.php');
             }
+
+            // Bitácora ANTES del borrado físico (datos_json conserva el rastro).
+            (new MovimientoService($this->db))->registrarEliminacion($activo, Permisos::idUsuario());
 
             $ok = (new Activo($this->db))->eliminar($id);
             $_SESSION[$ok ? 'success' : 'error'] = $ok ? 'Activo eliminado.' : 'No se pudo eliminar.';
@@ -693,14 +474,17 @@ class HomeController
 
     private function datosDesdePost(): array
     {
+        // El stock_id ya NO se acepta del formulario: lo resuelve StockResolver
+        // a partir del estatus (en_uso→tienda, asignado→usuario, en_bodega→bodega,
+        // garantia/baja→ATI de la tienda).
         return [
             'serie'                 => trim($_POST['serie'] ?? ''),
-            'placa'                 => trim($_POST['placa'] ?? '') ?: null,
+            'codigo_barras'         => trim($_POST['codigo_barras'] ?? '') ?: null,
+            'num_activo'            => trim($_POST['num_activo'] ?? '') ?: null,
             'modelo_id'             => !empty($_POST['modelo_id'])             ? (int) $_POST['modelo_id']             : null,
             'status'                => Activo::normalizarStatus($_POST['status'] ?? 'en_bodega'),
             'procedencia_tienda_id' => !empty($_POST['procedencia_tienda_id']) ? (int) $_POST['procedencia_tienda_id'] : null,
             'tienda_uso_id'         => !empty($_POST['tienda_uso_id'])         ? (int) $_POST['tienda_uso_id'] : null,
-            'stock_id'              => !empty($_POST['stock_id'])              ? (int) $_POST['stock_id']              : null,
         ];
     }
 
@@ -727,7 +511,7 @@ class HomeController
         $out = fopen('php://output', 'w');
         fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM UTF-8
 
-        fputcsv($out, ['ID', 'Serie', 'Placa', 'Dispositivo', 'Modelo', 'Área', 'Status',
+        fputcsv($out, ['ID', 'Serie', 'Código de barras', 'N° de activo', 'Dispositivo', 'Modelo', 'Área', 'Status',
                        'Plaza', 'Negocio', 'Stock (tipo)', 'Técnico/Bodega',
                        'Tienda en uso', 'Procedencia', 'Fecha alta']);
 
@@ -735,7 +519,8 @@ class HomeController
             fputcsv($out, [
                 $a['id'],
                 $a['serie'],
-                $a['placa'] ?? '',
+                $a['codigo_barras'] ?? '',
+                $a['num_activo'] ?? '',
                 $a['dispositivo_nombre'] ?? '',
                 $a['modelo_nombre'] ?? '',
                 $a['area_nombre'] ?? '',
@@ -743,7 +528,11 @@ class HomeController
                 $a['plaza_nombre'] ?? '',
                 $a['negocio_nombre'] ?? '',
                 $a['stock_tipo'] ?? '',
-                $a['stock_tipo'] === 'usuario' ? ($a['usuario_nombre'] ?? '') : ($a['bodega_nombre'] ?? ''),
+                match ($a['stock_tipo'] ?? '') {
+                    'usuario' => $a['usuario_nombre'] ?? '',
+                    'tienda'  => $a['tienda_stock_nombre'] ?? '',
+                    default   => $a['bodega_nombre'] ?? '',
+                },
                 $a['tienda_uso_nombre'] ?? '',
                 $a['procedencia_nombre'] ?? '',
                 $a['fecha_alta'] ?? '',

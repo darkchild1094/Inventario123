@@ -5,10 +5,18 @@
 
 <style>
     .navbar-sigma { background-color: #212529; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-    .navbar-sigma .navbar-brand { font-weight: 700; color: white; }
-    .navbar-sigma .nav-link { color: rgba(255,255,255,.85); font-weight: 500; transition: color .2s; }
+    .navbar-sigma .navbar-brand { font-weight: 700; color: white; display: flex; align-items: center; }
+    .navbar-sigma .nav-link {
+        color: rgba(255,255,255,.85); font-weight: 500; transition: color .2s;
+        white-space: nowrap; padding-left: .65rem; padding-right: .65rem;
+        display: flex; align-items: center;
+    }
     .navbar-sigma .nav-link:hover { color: white; }
     .navbar-sigma .nav-link.active { color: #0d6efd !important; font-weight: 700; }
+    @media (max-width: 1199.98px) {
+        .navbar-sigma .navbar-collapse { padding-top: .5rem; }
+        .navbar-sigma .nav-link { padding: .5rem .25rem; }
+    }
     .user-menu { color: rgba(255,255,255,.95) !important; padding: 8px 15px !important; border-radius: 10px; transition: all .3s; }
     .user-menu:hover { background-color: rgba(255,255,255,.1); }
     .user-avatar { width:35px; height:35px; border-radius:50%; background:linear-gradient(135deg,#667eea,#764ba2); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.9rem; color:white; border:2px solid rgba(255,255,255,.2); }
@@ -19,10 +27,10 @@
     .user-dropdown .dropdown-header { padding:20px; background:linear-gradient(135deg,#f8f9fa,#e9ecef); border-radius:15px 15px 0 0; }
 </style>
 
-<nav class="navbar navbar-expand-lg navbar-dark navbar-sigma mb-4">
+<nav class="navbar navbar-expand-xl navbar-dark navbar-sigma mb-4">
     <div class="container">
         <a class="navbar-brand" href="index.php">
-            <img src="assets/img/logo_texto_white_520x120.png" alt="Inventario 123" style="height:38px;width:auto;"
+            <img src="assets/img/logo_texto_white_520x120.png" alt="Inventario 123" style="height:36px;width:auto;"
                  onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
             <span style="display:none;font-size:1.25rem;">Inventario 123</span>
         </a>
@@ -32,7 +40,7 @@
         </button>
 
         <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto">
+            <ul class="navbar-nav me-auto align-items-xl-center gap-xl-1">
 
                 <?php
                 $tipo    = $_SESSION['usuario']['tipo'] ?? $_SESSION['usuario_tipo'] ?? '';
@@ -80,6 +88,28 @@
                         <a class="nav-link <?= ($_GET['action'] ?? '') === 'crear' ? 'active' : '' ?>"
                            href="index.php?action=crear">
                             <i class="fas fa-plus-circle me-1"></i> Nuevo Activo
+                        </a>
+                    </li>
+                <?php endif; ?>
+
+                <?php
+                // ── HISTORIAL: admin, coordinador, fs, ati ────────────────────
+                if (in_array($tipo, ['admin', 'coordinador', 'fs', 'ati'])): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $ctrl === 'historial' ? 'active' : '' ?>"
+                           href="index.php?controller=historial&action=index">
+                            <i class="fas fa-clock-rotate-left me-1"></i> Historial
+                        </a>
+                    </li>
+                <?php endif; ?>
+
+                <?php
+                // ── TIENDAS (ATI responsable): solo admin ─────────────────────
+                if ($tipo === 'admin'): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $ctrl === 'tienda' ? 'active' : '' ?>"
+                           href="index.php?controller=tienda&action=index">
+                            <i class="fas fa-store me-1"></i> Tiendas
                         </a>
                     </li>
                 <?php endif; ?>

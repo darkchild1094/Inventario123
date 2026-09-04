@@ -89,15 +89,27 @@ class Permisos
         return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati']);
     }
 
+    /** Ids de plaza del usuario en sesión (asignadas o, en su defecto, la principal). */
+    public static function misPlazas(): array
+    {
+        return self::plazasIds() ?: array_filter([self::plazaId()]);
+    }
+
     /** Puede editar un activo específico: fs y ati solo pueden editar activos de su stock */
     public static function puedeEditarActivoConcreto(array $activo): bool
     {
         if (self::esAdmin() || self::esCoordinador()) return true;
 
+        $esSuStockPersonal = ($activo['stock_tipo'] ?? '') === 'usuario'
+            && (int) ($activo['usuario_stock_id'] ?? 0) === self::idUsuario();
+
+        // Los activos EN USO viven en el stock de la tienda: fs/ati pueden operarlos
+        // (incluye hacer reemplazos) si la tienda está en su(s) plaza(s).
+        $esTiendaDeSuPlaza = ($activo['stock_tipo'] ?? '') === 'tienda'
+            && in_array((int) ($activo['plaza_id'] ?? 0), self::misPlazas(), true);
+
         if (self::esFs() || self::tipo() === 'ati') {
-            // fs/ati: solo activos en su stock personal
-            return $activo['stock_tipo'] === 'usuario'
-                && (int)$activo['usuario_stock_id'] === self::idUsuario();
+            return $esSuStockPersonal || $esTiendaDeSuPlaza;
         }
 
         return false;
@@ -111,15 +123,17 @@ class Permisos
         $tipo = self::tipo();
 
         if ($tipo === 'coordinador') {
-            $misPlazas = self::plazasIds() ?: [self::plazaId()];
-            return in_array((int) ($activo['plaza_id'] ?? 0), $misPlazas, true);
+            return in_array((int) ($activo['plaza_id'] ?? 0), self::misPlazas(), true);
         }
         if ($tipo === 'ati') {
             return (int) ($activo['plaza_id'] ?? 0) === self::plazaId();
         }
         if ($tipo === 'fs') {
-            return $activo['stock_tipo'] === 'usuario'
+            $esSuStock = ($activo['stock_tipo'] ?? '') === 'usuario'
                 && (int) ($activo['usuario_stock_id'] ?? 0) === self::idUsuario();
+            $esTiendaDeSuPlaza = ($activo['stock_tipo'] ?? '') === 'tienda'
+                && in_array((int) ($activo['plaza_id'] ?? 0), self::misPlazas(), true);
+            return $esSuStock || $esTiendaDeSuPlaza;
         }
 
         return false;
@@ -172,6 +186,36 @@ class Permisos
     public static function puedeVerBodega(): bool
     {
         return in_array(self::tipo(), ['admin', 'coordinador', 'ati']);
+    }
+
+    /** Puede ver la pestaña Historial */
+    public static function puedeVerHistorial(): bool
+    {
+        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati'], true);
+    }
+
+    /** Puede gestionar la asignación de ATI por tienda (pantalla "Tiendas") */
+    public static function puedeGestionarTiendas(): bool
+    {
+        return self::esAdmin();
+    }
+
+    /**
+     * Scope del Historial:
+     *   admin       → todo
+     *   coordinador → sus plazas asignadas
+     *   ati         → su plaza
+     *   fs          → su propio stock personal + todo lo de tiendas (fs_scope)
+     */
+    public static function filtrosHistorial(): array
+    {
+        return match (self::tipo()) {
+            'admin'       => [],
+            'coordinador' => ['plaza_id' => self::misPlazas()],
+            'ati'         => ['plaza_id' => self::plazaId()],
+            'fs'          => ['fs_scope' => self::idUsuario()],
+            default       => ['plaza_id' => [-1]],
+        };
     }
 
     // ── Filtros de visibilidad para consultas ─────────────────────────────────

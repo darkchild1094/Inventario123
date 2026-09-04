@@ -26,19 +26,20 @@ if (file_exists($composerAutoload)) {
     require_once $composerAutoload;
 } else {
     spl_autoload_register(function ($class) {
-        $prefix = 'App\\';
-        $base_dir = ROOT_PATH . '/app/';
-        $len = strlen($prefix);
-        if (strncmp($prefix, $class, $len) !== 0) {
-            // No es del namespace App, probar con Config
-            $prefix = 'Config\\';
-            $base_dir = ROOT_PATH . '/config/';
+        // El prefijo más específico primero (igual que hace Composer).
+        $maps = [
+            'App\\Config\\' => ROOT_PATH . '/config/',
+            'App\\'         => ROOT_PATH . '/app/',
+            'Config\\'      => ROOT_PATH . '/config/',
+        ];
+        foreach ($maps as $prefix => $base_dir) {
             $len = strlen($prefix);
-            if (strncmp($prefix, $class, $len) !== 0) return;
+            if (strncmp($prefix, $class, $len) !== 0) continue;
+            $relative_class = substr($class, $len);
+            $file = $base_dir . str_replace('\\', '/', $relative_class) . '.php';
+            if (file_exists($file)) require $file;
+            return;
         }
-        $relative_class = substr($class, $len);
-        $file = $base_dir . str_replace('\\', '/', $relative_class) . '.php';
-        if (file_exists($file)) require $file;
     });
 }
 
@@ -132,6 +133,14 @@ switch ($controllerName) {
 
     case 'usuario':
         $controller = new \App\Controllers\UsuarioController($db);
+        break;
+
+    case 'historial':
+        $controller = new \App\Controllers\HistorialController($db);
+        break;
+
+    case 'tienda':
+        $controller = new \App\Controllers\TiendaController($db);
         break;
 
     default:

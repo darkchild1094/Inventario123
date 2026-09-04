@@ -45,7 +45,7 @@
                             <i class="fas fa-search text-muted"></i>
                         </span>
                         <input type="text" name="busqueda" id="filtroBusqueda" class="form-control bg-light border-start-0"
-                               placeholder="Serie, placa, modelo..."
+                               placeholder="Serie, código, modelo..."
                                value="<?= htmlspecialchars($busqueda ?? '') ?>" autocomplete="off">
                     </div>
                 </div>
@@ -84,6 +84,18 @@
                                 data-region-id="<?= (int) ($p['region_id']  ?? 0) ?>"
                                 <?= (($plaza_id ?? null) == $p['id']) ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($p['nombre']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label text-muted small fw-bold mb-1">Tienda</label>
+                    <select name="tienda_id" id="filtroTienda" class="form-select bg-light">
+                        <option value="">Todas...</option>
+                        <?php foreach (($tiendasFiltro ?? []) as $t): ?>
+                            <option value="<?= $t['id'] ?>" data-plaza-id="<?= (int) ($t['plaza_id'] ?? 0) ?>"
+                                <?= (($tienda_id ?? null) == $t['id']) ? 'selected' : '' ?>>
+                                <?= htmlspecialchars(($t['cr_tienda'] ?? '') . ' · ' . $t['nombre']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -200,6 +212,7 @@
     const selNegocio = document.getElementById('filtroNegocio');
     const selRegion  = document.getElementById('filtroRegion');
     const selPlaza   = document.getElementById('filtroPlaza');
+    const selTienda  = document.getElementById('filtroTienda');
     const selUsuario = document.getElementById('filtroUsuario');
 
     function filtrarOpciones(select, atributo, valorPermitido) {
@@ -228,8 +241,9 @@
         if (selRegion && selRegion.value) {
             filtrarOpciones(selPlaza, 'data-region-id', selRegion.value);
         }
-        // Usuario se acota por la Plaza elegida
+        // Usuario y Tienda se acotan por la Plaza elegida
         filtrarOpciones(selUsuario, 'data-plaza-id', selPlaza ? selPlaza.value : '');
+        filtrarOpciones(selTienda,  'data-plaza-id', selPlaza ? selPlaza.value : '');
     }
 
     if (selNegocio) selNegocio.addEventListener('change', () => { aplicarCascada(); aplicarFiltros(); });
@@ -240,7 +254,7 @@
     aplicarCascada();
 
     // Selects sin dependencias en cascada: se aplican al instante al cambiar
-    ['filtroUsuario', 'filtroStatus'].forEach(id => {
+    ['filtroTienda', 'filtroUsuario', 'filtroStatus'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', () => aplicarFiltros());
     });

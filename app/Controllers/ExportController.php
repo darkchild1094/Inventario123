@@ -154,8 +154,8 @@ class ExportController
             // D: Serie
             $sheet->setCellValue("D{$fila}", $a['serie'] ?? '');
 
-            // E: Activo (placa / número de activo fijo)
-            $sheet->setCellValue("E{$fila}", $a['placa'] ?? '');
+            // E: Código de barras
+            $sheet->setCellValue("E{$fila}", $a['codigo_barras'] ?? '');
 
             // F: Estatus con color
             $sheet->setCellValue("F{$fila}", $statusKey);

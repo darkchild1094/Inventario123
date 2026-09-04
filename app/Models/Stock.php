@@ -20,10 +20,12 @@ class Stock
         $stmt = $this->conn->prepare(
             "SELECT s.*,
                     u.nombre AS usuario_nombre,
-                    b.nombre AS bodega_nombre
+                    b.nombre AS bodega_nombre,
+                    t.nombre AS tienda_nombre
              FROM {$this->table} s
              LEFT JOIN usuario u ON s.usuario_id = u.id
              LEFT JOIN bodega  b ON s.bodega_id  = b.id
+             LEFT JOIN tienda  t ON s.tienda_id  = t.id
              WHERE s.id = :id LIMIT 1"
         );
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
@@ -97,6 +99,32 @@ class Stock
         return $row;
     }
 
+    /**
+     * Obtiene el stock de una tienda. Si no existe, lo crea automáticamente.
+     *
+     * Normalmente NO hará falta crearlo: cada tienda nace con su stock por
+     * el trigger `trg_crear_stock_tienda`, y las tiendas previas quedaron
+     * pobladas por la migración 001. Esto es solo una red de seguridad.
+     */
+    public function obtenerPorTienda(int $tiendaId): array|false
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT * FROM {$this->table}
+             WHERE tipo = 'tienda' AND tienda_id = :id LIMIT 1"
+        );
+        $stmt->bindValue(':id', $tiendaId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            $this->crearParaTienda($tiendaId);
+            $stmt->execute();
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        return $row;
+    }
+
     public function crearParaUsuario(int $usuarioId, int $plazaId = 0): bool
     {
         try {
@@ -121,6 +149,22 @@ class Stock
                  VALUES ('bodega', NULL, :bodega_id)"
             );
             return $stmt->execute([':bodega_id' => $bodegaId]);
+        } catch (PDOException $e) {
+            throw $e;
+        }
+    }
+
+    public function crearParaTienda(int $tiendaId): bool
+    {
+        try {
+            // plaza_id se copia de la tienda para mantener la misma
+            // convención que el trigger y la migración de backfill.
+            $stmt = $this->conn->prepare(
+                "INSERT INTO {$this->table} (tipo, usuario_id, bodega_id, tienda_id, plaza_id)
+                 SELECT 'tienda', NULL, NULL, t.id, t.plaza_id
+                 FROM tienda t WHERE t.id = :tienda_id"
+            );
+            return $stmt->execute([':tienda_id' => $tiendaId]);
         } catch (PDOException $e) {
             throw $e;
         }

@@ -13,6 +13,9 @@ use App\Models\Negocio;
 use App\Models\Bodega;
 use App\Models\Stock;
 use App\Models\Area;
+use App\Models\Movimiento;
+use App\Services\ActivoGuardado;
+use App\Services\MovimientoService;
 use App\Helpers\Permisos;
 
 class ApiController
@@ -41,6 +44,8 @@ class ApiController
                 'puedeGestionarUsuarios'=> Permisos::puedeGestionarUsuarios(),
                 'puedeExportar'         => Permisos::puedeExportar(),
                 'puedeVerBodega'        => Permisos::puedeVerBodega(),
+                'puedeVerHistorial'     => Permisos::puedeVerHistorial(),
+                'puedeGestionarTiendas' => Permisos::puedeGestionarTiendas(),
                 'plazaId'               => Permisos::plazaId(),
                 'plazasIds'             => Permisos::plazasIds(),
             ],
@@ -77,6 +82,7 @@ class ApiController
             $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
             $filtros['region_id']  = $_GET['region_id']  ?? null;
             $filtros['plaza_id']   = $_GET['plaza_id']   ?? null;
+            $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
             $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
         } elseif ($tipo === 'coordinador') {
             $misPlazas = Permisos::plazasIds() ?: [$plazaId];
@@ -86,6 +92,7 @@ class ApiController
                 : $misPlazas;
             $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
             $filtros['region_id']  = $_GET['region_id']  ?? null;
+            $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
             $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
         } elseif ($tipo === 'ati') {
             $filtros['plaza_id'] = $plazaId;
@@ -143,107 +150,52 @@ class ApiController
             $this->json(['success' => false, 'message' => 'No tienes permiso para registrar activos.'], 403);
         }
 
-        $tipo        = Permisos::tipo();
-        $stockModel  = new Stock($this->db);
-        $activoModel = new Activo($this->db);
-        $datos       = $this->datosActivoPost();
-        $statusPost  = $datos['status'];
-
-        $negocioIdPost = (int) ($_POST['negocio_id'] ?? 0);
-        $plazaId       = $this->resolverPlazaId($negocioIdPost);
+        $datos   = $this->datosActivoPost();
+        $plazaId = $this->resolverPlazaId((int) ($_POST['negocio_id'] ?? 0));
         if ($plazaId <= 0) {
             $this->json(['success' => false, 'message' => 'Debes indicar una plaza válida.'], 400);
         }
 
-        $stock = null;
+        $post = array_merge($_POST, ['plaza_id' => $plazaId]);
+        $res  = (new ActivoGuardado($this->db))->crear($datos, $post, $this->actorSesion());
 
-        if ($tipo === 'fs') {
-            if ($statusPost === 'en_uso' || $statusPost === 'asignado') {
-                $stock = $stockModel->obtenerPorUsuario(Permisos::idUsuario(), $plazaId);
-            } else {
-                $stock = $this->stockDeBodega($plazaId);
-            }
-        } elseif ($tipo === 'ati') {
-            if ($statusPost === 'asignado') {
-                $asignadoUsuarioId = (int) ($_POST['asignado_usuario_id'] ?? 0) ?: Permisos::idUsuario();
-                if ($asignadoUsuarioId !== Permisos::idUsuario()) {
-                    $err = $this->validarAsignacion($asignadoUsuarioId, $plazaId);
-                    if ($err) $this->json(['success' => false, 'message' => $err], 400);
-                }
-                $stock = $stockModel->obtenerPorUsuario($asignadoUsuarioId, $plazaId);
-            } elseif ($statusPost === 'en_uso') {
-                $stock = $stockModel->obtenerPorUsuario(Permisos::idUsuario(), $plazaId);
-            } else {
-                $stock = $this->stockDeBodega($plazaId);
-            }
-        } elseif ($statusPost === 'asignado' && !empty($_POST['asignado_usuario_id'])) {
-            // admin / coordinador asignando a un usuario específico
-            $asignadoUsuarioId = (int) $_POST['asignado_usuario_id'];
-            if ($tipo !== 'admin') {
-                $err = $this->validarAsignacion($asignadoUsuarioId, $plazaId);
-                if ($err) $this->json(['success' => false, 'message' => $err], 400);
-            }
-            $stock = $stockModel->obtenerPorUsuario($asignadoUsuarioId, $plazaId);
-        } elseif (!empty($_POST['stock_destino'])) {
-            // admin/coordinador con destino explícito: 'bodega_X' o 'usuario_X'
-            [$tipoDestino, $idDest] = array_pad(explode('_', $_POST['stock_destino'], 2), 2, null);
-            if ($tipoDestino === 'bodega') {
-                $stock = $stockModel->obtenerPorBodega((int) $idDest);
-            } else {
-                $stock = $stockModel->obtenerPorUsuario((int) $idDest, $plazaId);
-            }
-        } elseif ($statusPost === 'en_bodega') {
-            $stock = $this->stockDeBodega($plazaId);
+        if ($res['ok']) {
+            $this->json(['success' => true, 'message' => 'Activo registrado correctamente.', 'id' => $res['id']]);
+        } else {
+            $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo registrar el activo.'], 400);
         }
-
-        $datos['stock_id'] = $stock ? $stock['id'] : null;
-
-        if (!$activoModel->crear($datos)) {
-            $this->json(['success' => false, 'message' => 'Error al crear. Verifica que la serie no esté duplicada.'], 400);
-        }
-
-        $nuevoId = $activoModel->ultimoId();
-        $this->json(['success' => true, 'message' => 'Activo registrado correctamente.', 'id' => $nuevoId]);
     }
 
     public function actualizarActivo(): void
     {
         $this->requerirPost();
-        $id          = (int) ($_POST['id'] ?? 0);
-        $activoModel = new Activo($this->db);
-        $activo      = $activoModel->obtenerPorId($id);
+        $id     = (int) ($_POST['id'] ?? 0);
+        $antes  = (new Activo($this->db))->obtenerPorId($id);
 
-        if (!$activo) $this->json(['success' => false, 'message' => 'Activo no encontrado.'], 404);
-        if (!Permisos::puedeEditarActivoConcreto($activo)) {
+        if (!$antes) $this->json(['success' => false, 'message' => 'Activo no encontrado.'], 404);
+        if (!Permisos::puedeEditarActivoConcreto($antes)) {
             $this->json(['success' => false, 'message' => 'No tienes permiso para editar este activo.'], 403);
         }
 
-        $tipo  = Permisos::tipo();
-        $datos = array_merge(['id' => $id], $this->datosActivoPost());
+        $datos = $this->datosActivoPost();
+        $post  = array_merge($_POST, ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())]);
+        $res   = (new ActivoGuardado($this->db))->actualizar($id, $datos, $antes, $post, $this->actorSesion());
 
-        if (Permisos::esFs() || $tipo === 'ati') {
-            if ($tipo === 'ati'
-                && $datos['status'] === 'asignado'
-                && !empty($_POST['asignado_usuario_id'])
-            ) {
-                $asignadoUsuarioId = (int) $_POST['asignado_usuario_id'];
-                $plazaIdActivo     = (int) ($activo['plaza_id'] ?? Permisos::plazaId());
-                if ($asignadoUsuarioId !== Permisos::idUsuario()) {
-                    $err = $this->validarAsignacion($asignadoUsuarioId, $plazaIdActivo);
-                    if ($err) $this->json(['success' => false, 'message' => $err], 400);
-                }
-                $stockNuevo = (new Stock($this->db))->obtenerPorUsuario($asignadoUsuarioId, $plazaIdActivo);
-                $datos['stock_id'] = $stockNuevo ? $stockNuevo['id'] : $activo['stock_id'];
-            } else {
-                $datos['stock_id'] = $activo['stock_id'];
-            }
-        }
-
-        if ($activoModel->actualizar($datos)) {
+        if ($res['ok']) {
             $this->json(['success' => true, 'message' => 'Activo actualizado correctamente.']);
         } else {
-            $this->json(['success' => false, 'message' => 'No se pudo actualizar el activo.'], 400);
+            $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo actualizar el activo.'], 400);
         }
+    }
+
+    private function actorSesion(): array
+    {
+        return [
+            'id'       => Permisos::idUsuario(),
+            'tipo'     => Permisos::tipo(),
+            'plazas'   => array_map('intval', $_SESSION['usuario']['plaza_ids'] ?? []),
+            'plaza_id' => Permisos::plazaId(),
+        ];
     }
 
     public function eliminarActivo(): void
@@ -258,6 +210,8 @@ class ApiController
         if (!$activo || !Permisos::puedeEliminarActivo($activo)) {
             $this->json(['success' => false, 'message' => 'No tienes permiso para eliminar este activo.'], 403);
         }
+
+        (new MovimientoService($this->db))->registrarEliminacion($activo, Permisos::idUsuario());
 
         if ($activoModel->eliminar($id)) {
             $this->json(['success' => true, 'message' => 'Activo eliminado correctamente.']);
@@ -521,6 +475,63 @@ class ApiController
         $this->json((new Bodega($this->db))->obtenerPorPlaza((int) $_GET['plaza_id']));
     }
 
+    // GET ?action=obtenerActivosEnTiendaPorDispositivo&tienda_id=X&dispositivo_id=Y&excepto_id=Z
+    // Alimenta el selector "¿Reemplaza a?" del formulario de activos.
+    public function obtenerActivosEnTiendaPorDispositivo(): void
+    {
+        $tiendaId      = (int) ($_GET['tienda_id'] ?? 0);
+        $dispositivoId = (int) ($_GET['dispositivo_id'] ?? 0);
+        $exceptoId     = (int) ($_GET['excepto_id'] ?? 0) ?: null;
+        if ($tiendaId <= 0 || $dispositivoId <= 0) { $this->json([]); return; }
+        $this->json((new Activo($this->db))->enTiendaPorDispositivo($tiendaId, $dispositivoId, $exceptoId));
+    }
+
+    // GET ?action=obtenerAtisPorPlaza&plaza_id=X
+    public function obtenerAtisPorPlaza(): void
+    {
+        if (empty($_GET['plaza_id'])) { $this->json([]); return; }
+        $this->json((new Tienda($this->db))->atisDePlaza((int) $_GET['plaza_id']));
+    }
+
+    // GET ?action=listarHistorial  (mismos filtros que la pestaña Historial)
+    public function listarHistorial(): void
+    {
+        if (!Permisos::puedeVerHistorial()) {
+            $this->json(['success' => false, 'message' => 'No tienes acceso al historial.'], 403);
+        }
+        $filtros = array_merge(Permisos::filtrosHistorial(), array_filter([
+            'activo_id'  => $_GET['activo_id']  ?? null,
+            'serie'      => $_GET['serie']      ?? null,
+            'evento'     => $_GET['evento']     ?? null,
+            'tienda_id'  => $_GET['tienda_id']  ?? null,
+            'usuario_id' => $_GET['usuario_id'] ?? null,
+            'desde'      => $_GET['desde']      ?? null,
+            'hasta'      => $_GET['hasta']      ?? null,
+        ], fn($v) => $v !== null && $v !== ''));
+
+        $pagina    = max(1, (int) ($_GET['pagina']     ?? 1));
+        $porPagina = max(1, (int) ($_GET['por_pagina'] ?? 30));
+        $this->json((new Movimiento($this->db))->listar($filtros, $pagina, $porPagina));
+    }
+
+    // POST ?action=asignarAtiTienda  (tienda_id, ati_usuario_id|'' )  — solo admin
+    public function asignarAtiTienda(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeGestionarTiendas()) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $tiendaId = (int) ($_POST['tienda_id'] ?? 0);
+        $atiId    = (int) ($_POST['ati_usuario_id'] ?? 0) ?: null;
+        if ($tiendaId <= 0) $this->json(['success' => false, 'message' => 'Tienda inválida.'], 400);
+
+        if ((new Tienda($this->db))->asignarAti($tiendaId, $atiId)) {
+            $this->json(['success' => true, 'message' => 'ATI responsable actualizado.']);
+        } else {
+            $this->json(['success' => false, 'message' => 'No se pudo actualizar.'], 500);
+        }
+    }
+
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     public function login(): void
@@ -635,40 +646,17 @@ class ApiController
         return $misPlazas[0] ?? Permisos::plazaId();
     }
 
-    private function stockDeBodega(int $plazaId): ?array
-    {
-        $bodega = (new Bodega($this->db))->obtenerPorPlaza($plazaId);
-        if (!$bodega) return null;
-        $stockModel = new Stock($this->db);
-        $stock = $stockModel->obtenerPorBodega((int) $bodega['id']);
-        if ($stock && isset($stock['bodega_id']) && (int) $stock['bodega_id'] !== (int) $bodega['id']) {
-            $stockModel->crearParaBodega((int) $bodega['id']);
-            $stock = $stockModel->obtenerPorBodega((int) $bodega['id']);
-        }
-        return $stock;
-    }
-
-    /** Valida que un usuario destino pertenezca a la plaza indicada. Devuelve mensaje de error o null si OK. */
-    private function validarAsignacion(int $usuarioId, int $plazaId): ?string
-    {
-        $usuarioModel    = new Usuario($this->db);
-        $usuarioAsignado = $usuarioModel->obtenerPorId($usuarioId);
-        if (!$usuarioAsignado || !$usuarioModel->perteneceAPlaza($usuarioId, $plazaId)) {
-            return 'Solo puedes asignar activos a usuarios de la plaza seleccionada.';
-        }
-        return null;
-    }
-
     private function datosActivoPost(): array
     {
+        // stock_id ya no se acepta del cliente: lo resuelve StockResolver por estatus.
         return [
             'serie'                 => trim($_POST['serie']  ?? ''),
-            'placa'                 => trim($_POST['placa'] ?? '') ?: null,
+            'codigo_barras'         => trim($_POST['codigo_barras'] ?? '') ?: null,
+            'num_activo'            => trim($_POST['num_activo'] ?? '') ?: null,
             'modelo_id'             => !empty($_POST['modelo_id'])             ? (int) $_POST['modelo_id']             : null,
             'status'                => Activo::normalizarStatus($_POST['status'] ?? 'en_bodega'),
             'procedencia_tienda_id' => !empty($_POST['procedencia_tienda_id']) ? (int) $_POST['procedencia_tienda_id'] : null,
             'tienda_uso_id'         => !empty($_POST['tienda_uso_id'])         ? (int) $_POST['tienda_uso_id']         : null,
-            'stock_id'              => !empty($_POST['stock_id'])              ? (int) $_POST['stock_id']              : null,
         ];
     }
 
