@@ -13,6 +13,8 @@
         .campo-condicional { display: none; }
         .usuario-fijo { background:#f1f3f5; border:1px solid #dee2e6; border-radius:8px; padding:10px 14px; display:flex; align-items:center; gap:10px; }
         .info-readonly { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:8px 14px; font-size:.85rem; color:#6c757d; }
+        .foto-preview { max-width:100%; max-height:140px; border-radius:8px; border:1px solid #dee2e6; object-fit:cover; display:block; }
+        .foto-actual { font-size:.75rem; color:#6c757d; }
     </style>
 </head>
 <body>
@@ -107,7 +109,7 @@ if ($stockTipo === 'usuario') {
                     <?php unset($_SESSION['error']); ?>
                 <?php endif; ?>
 
-                <form action="index.php?action=actualizar" method="POST" id="formEditar">
+                <form action="index.php?action=actualizar" method="POST" id="formEditar" enctype="multipart/form-data">
                     <input type="hidden" name="id"       value="<?= (int)$activo['id'] ?>">
                     <input type="hidden" name="stock_id" id="stock_id_final" value="<?= (int)$stockId ?>">
 
@@ -378,6 +380,39 @@ if ($stockTipo === 'usuario') {
 
                     </div>
 
+                    <!-- ── Fotografías ─────────────────────────────────────── -->
+                    <h5 class="section-title">
+                        <i class="fas fa-camera me-2"></i> Fotografías
+                        <span class="text-muted fw-normal small">(Opcional)</span>
+                    </h5>
+                    <div class="row g-3 mb-2">
+                        <?php
+                        $camposFoto = [
+                            'foto_equipo' => ['Foto del equipo', 'prev_foto_equipo'],
+                            'foto_serie'  => ['Foto de la serie', 'prev_foto_serie'],
+                            'foto_activo' => ['Foto del código de barras', 'prev_foto_activo'],
+                        ];
+                        ?>
+                        <?php foreach ($camposFoto as $campo => [$label, $previewId]): ?>
+                            <div class="col-md-4">
+                                <label class="form-label"><?= $label ?></label>
+                                <input type="file" name="<?= $campo ?>" class="form-control foto-input"
+                                       accept="image/*" capture="environment" data-preview="<?= $previewId ?>">
+                                <?php if (!empty($activo[$campo])): ?>
+                                    <a href="uploads/<?= htmlspecialchars($activo[$campo]) ?>" target="_blank" class="d-block mt-2">
+                                        <img id="<?= $previewId ?>" class="foto-preview"
+                                             src="uploads/thumbs/<?= htmlspecialchars($activo[$campo]) ?>"
+                                             alt="<?= $label ?>"
+                                             onerror="this.src='uploads/<?= htmlspecialchars($activo[$campo]) ?>'">
+                                    </a>
+                                    <small class="foto-actual">Foto actual — elige otra para reemplazarla.</small>
+                                <?php else: ?>
+                                    <img id="<?= $previewId ?>" class="foto-preview mt-2 d-none" alt="Vista previa">
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+
                     <!-- ── Metadatos ──────────────────────────────────────── -->
                     <h5 class="section-title"><i class="fas fa-info-circle me-2"></i> Registro</h5>
                     <div class="row g-3 mb-4">
@@ -601,6 +636,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Recalcular el selector de reemplazo si cambia el dispositivo
     const disp = document.getElementById('dispositivo');
     if (disp) disp.addEventListener('change', () => setTimeout(cargarReemplazos, 300));
+
+    // Vista previa de las fotos al elegir un archivo nuevo (reemplaza la actual)
+    document.querySelectorAll('.foto-input').forEach(inp => {
+        inp.addEventListener('change', () => {
+            const prev = document.getElementById(inp.dataset.preview);
+            if (!prev) return;
+            const file = inp.files && inp.files[0];
+            if (!file) return;
+            prev.src = URL.createObjectURL(file);
+            prev.classList.remove('d-none');
+            const nota = inp.closest('.col-md-4')?.querySelector('.foto-actual');
+            if (nota) nota.textContent = 'Nueva foto seleccionada (se guardará al enviar).';
+        });
+    });
 });
 </script>
 </body>

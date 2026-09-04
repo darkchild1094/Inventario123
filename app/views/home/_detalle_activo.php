@@ -111,6 +111,31 @@ $statusLabel = match($activo['status'] ?? '') {
     </div>
 </div>
 
+<?php
+$fotosActivo = [
+    'foto_equipo' => 'Equipo',
+    'foto_serie'  => 'Serie',
+    'foto_activo' => 'Código de barras',
+];
+$hayFotos = array_filter($fotosActivo, fn($_, $c) => !empty($activo[$c]), ARRAY_FILTER_USE_BOTH);
+?>
+<?php if (!empty($hayFotos)): ?>
+    <hr class="my-3">
+    <h6 class="mb-2"><i class="fas fa-camera me-2 text-primary"></i>Fotografías</h6>
+    <div class="row g-2">
+        <?php foreach ($hayFotos as $campo => $label): ?>
+            <div class="col-4">
+                <a href="uploads/<?= htmlspecialchars($activo[$campo]) ?>" target="_blank">
+                    <img src="uploads/thumbs/<?= htmlspecialchars($activo[$campo]) ?>"
+                         onerror="this.src='uploads/<?= htmlspecialchars($activo[$campo]) ?>'"
+                         alt="<?= $label ?>" class="rounded border w-100" style="height:90px;object-fit:cover;">
+                </a>
+                <small class="text-muted d-block text-center"><?= $label ?></small>
+            </div>
+        <?php endforeach; ?>
+    </div>
+<?php endif; ?>
+
 <?php if (!empty($movimientos)): ?>
     <hr class="my-3">
     <h6 class="mb-2"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Línea de tiempo</h6>

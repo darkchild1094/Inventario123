@@ -156,6 +156,9 @@ class ApiController
             $this->json(['success' => false, 'message' => 'Debes indicar una plaza válida.'], 400);
         }
 
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
+        $datos = array_merge($datos, $fotos);
+
         $post = array_merge($_POST, ['plaza_id' => $plazaId]);
         $res  = (new ActivoGuardado($this->db))->crear($datos, $post, $this->actorSesion());
 
@@ -178,6 +181,12 @@ class ApiController
         }
 
         $datos = $this->datosActivoPost();
+
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: []);
+        foreach ($fotos as $key => $val) {
+            if ($val !== null) $datos[$key] = $val;
+        }
+
         $post  = array_merge($_POST, ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())]);
         $res   = (new ActivoGuardado($this->db))->actualizar($id, $datos, $antes, $post, $this->actorSesion());
 

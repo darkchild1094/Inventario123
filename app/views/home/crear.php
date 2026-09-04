@@ -12,6 +12,7 @@
         .section-title { color: #0d6efd; border-bottom: 2px solid #e9ecef; padding-bottom: 8px; margin-bottom: 20px; margin-top: 30px; }
         .campo-condicional { display: none; }
         .usuario-fijo { background:#f1f3f5; border:1px solid #dee2e6; border-radius:8px; padding:10px 14px; display:flex; align-items:center; gap:10px; }
+        .foto-preview { max-width:100%; max-height:140px; border-radius:8px; border:1px solid #dee2e6; object-fit:cover; display:block; }
     </style>
 </head>
 <body>
@@ -104,7 +105,7 @@ foreach ($usuarios as $u) {
                 <?php endif; ?>
                 </div>
 
-                <form action="index.php?action=guardar" method="POST" id="formActivo">
+                <form action="index.php?action=guardar" method="POST" id="formActivo" enctype="multipart/form-data">
                     <input type="hidden" name="stock_destino_default" id="stock_destino_hidden" value="<?= !empty($bodegaPorNegocio['id']) ? 'bodega_' . $bodegaPorNegocio['id'] : (!empty($bodegaOxxo['id']) ? 'bodega_' . $bodegaOxxo['id'] : '') ?>">
                     <?php if ($mostrarNegocio || $mostrarPlaza): ?>
                         <div class="row g-3 mb-3">
@@ -368,6 +369,32 @@ foreach ($usuarios as $u) {
 
                     </div>
 
+                    <!-- ── Fotografías ─────────────────────────────────────── -->
+                    <h5 class="section-title">
+                        <i class="fas fa-camera me-2"></i> Fotografías
+                        <span class="text-muted fw-normal small">(Opcional)</span>
+                    </h5>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Foto del equipo</label>
+                            <input type="file" name="foto_equipo" class="form-control foto-input"
+                                   accept="image/*" capture="environment" data-preview="prev_foto_equipo">
+                            <img id="prev_foto_equipo" class="foto-preview mt-2 d-none" alt="Vista previa">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Foto de la serie</label>
+                            <input type="file" name="foto_serie" class="form-control foto-input"
+                                   accept="image/*" capture="environment" data-preview="prev_foto_serie">
+                            <img id="prev_foto_serie" class="foto-preview mt-2 d-none" alt="Vista previa">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Foto del código de barras</label>
+                            <input type="file" name="foto_activo" class="form-control foto-input"
+                                   accept="image/*" capture="environment" data-preview="prev_foto_activo">
+                            <img id="prev_foto_activo" class="foto-preview mt-2 d-none" alt="Vista previa">
+                        </div>
+                    </div>
+
                     <div class="d-grid mt-4">
                         <button type="submit" class="btn btn-primary btn-lg" id="btnGuardar">
                             <i class="fas fa-save me-2"></i> Guardar Activo
@@ -583,6 +610,18 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         if (serie) serie.focus();
     }
+
+    // Vista previa de las fotos al elegir archivo
+    document.querySelectorAll('.foto-input').forEach(inp => {
+        inp.addEventListener('change', () => {
+            const prev = document.getElementById(inp.dataset.preview);
+            if (!prev) return;
+            const file = inp.files && inp.files[0];
+            if (!file) { prev.src = ''; prev.classList.add('d-none'); return; }
+            prev.src = URL.createObjectURL(file);
+            prev.classList.remove('d-none');
+        });
+    });
 });
 
 // ── Envío por AJAX: no recarga la página, conserva negocio/plaza/dispositivo/
@@ -618,15 +657,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function limpiarCamposDeInstancia() {
-        // Solo estos 3 se limpian entre un activo y el siguiente:
+        // Estos se limpian entre un activo y el siguiente (son propios de
+        // cada equipo, a diferencia de negocio/plaza/dispositivo/estatus):
         const serie = document.getElementById('campo_serie');
         if (serie) serie.value = '';
 
         const codBarras = form.querySelector('[name="codigo_barras"]');
         if (codBarras) codBarras.value = '';
 
+        const numActivo = form.querySelector('[name="num_activo"]');
+        if (numActivo) numActivo.value = '';
+
         const procedencia = form.querySelector('[name="procedencia_tienda_id"]');
         if (procedencia) procedencia.value = '';
+
+        // Fotos: limpiar los <input type="file"> y sus vistas previas
+        form.querySelectorAll('.foto-input').forEach(inp => {
+            inp.value = '';
+            const prev = document.getElementById(inp.dataset.preview);
+            if (prev) { prev.src = ''; prev.classList.add('d-none'); }
+        });
 
         if (serie) serie.focus();
     }
