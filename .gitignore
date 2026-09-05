@@ -11,3 +11,4 @@
 /femsa_assets.sql
 /database/migrations/004_import_activos_maf.up.sql
 /database/migrations/006_codigo_barras_num_activo.up.sql
+/database/migrations/015_import_activos_maf.up.sql
