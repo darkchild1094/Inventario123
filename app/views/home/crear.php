@@ -311,6 +311,17 @@ foreach ($usuarios as $u) {
                                         </select>
                                     </div>
                                 </div>
+                                <div class="row g-2 mt-1">
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Serie del equipo que sale
+                                            <span class="text-muted">(corrige si está mal)</span></label>
+                                        <input type="text" name="salida_serie" id="salida_serie" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Código de barras del equipo que sale</label>
+                                        <input type="text" name="salida_codigo_barras" id="salida_codigo_barras" class="form-control form-control-sm">
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -453,7 +464,10 @@ async function cargarReemplazos() {
         (data || []).forEach(a => {
             const marcaModelo = [a.marca_nombre, a.modelo_nombre].filter(Boolean).join(' ');
             const codigo = a.codigo_barras || '(sin código de barras)';
-            sRe.appendChild(new Option(`${marcaModelo} · ${codigo}`, a.id));
+            const opt = new Option(`${marcaModelo} · ${codigo}`, a.id);
+            opt.dataset.serie = a.serie || '';
+            opt.dataset.codigo = a.codigo_barras || '';
+            sRe.appendChild(opt);
         });
         cRe.style.display = (data && data.length) ? 'block' : 'none';
     } catch (e) { cRe.style.display = 'none'; }
@@ -464,7 +478,15 @@ function manejarReemplazo() {
     const sRe = document.getElementById('select_reemplazo');
     const cSal = document.getElementById('campo_salida');
     if (cSal) cSal.style.display = (sRe && sRe.value) ? 'block' : 'none';
-    if (sRe && sRe.value) { poblarSalidaUsuarios(); manejarSalida(); }
+    if (sRe && sRe.value) {
+        const opt = sRe.selectedOptions[0];
+        const iSerie = document.getElementById('salida_serie');
+        const iCod   = document.getElementById('salida_codigo_barras');
+        if (iSerie) iSerie.value = opt?.dataset.serie || '';
+        if (iCod)   iCod.value   = opt?.dataset.codigo || '';
+        poblarSalidaUsuarios();
+        manejarSalida();
+    }
 }
 
 function poblarSalidaUsuarios() {

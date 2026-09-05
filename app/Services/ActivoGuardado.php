@@ -205,11 +205,19 @@ class ActivoGuardado
             return;
         }
         $motivo = trim((string) ($post['motivo'] ?? '')) ?: null;
-        $this->mov->ejecutarReemplazo($entra, $reemplazaId, [
+        $destino = [
             'status'              => $post['salida_destino'] ?? 'asignado',
             'asignado_usuario_id' => (int) ($post['salida_usuario_id'] ?? 0),
             'ati_usuario_id'      => (int) ($post['salida_ati_usuario_id'] ?? 0),
-        ], $actorId, $motivo);
+        ];
+        // Corrección opcional de serie / código de barras del activo que sale.
+        if (array_key_exists('salida_serie', $post)) {
+            $destino['serie'] = (string) $post['salida_serie'];
+        }
+        if (array_key_exists('salida_codigo_barras', $post)) {
+            $destino['codigo_barras'] = (string) $post['salida_codigo_barras'];
+        }
+        $this->mov->ejecutarReemplazo($entra, $reemplazaId, $destino, $actorId, $motivo);
     }
 
     private function err(string $msg): array
