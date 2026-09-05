@@ -439,7 +439,10 @@ async function cargarReemplazos() {
         const r = await fetch(`index.php?controller=api&action=obtenerActivosEnTiendaPorDispositivo&tienda_id=${tienda.value}&dispositivo_id=${disp.value}&excepto_id=${ACTIVO_ID}`);
         const data = await r.json();
         sRe.innerHTML = '<option value="">— Ninguno (equipo adicional) —</option>';
-        (data || []).forEach(a => sRe.appendChild(new Option(`${a.modelo_nombre || ''} · ${a.serie}`, a.id)));
+        (data || []).forEach(a => {
+            const codigo = a.codigo_barras || a.serie || a.num_activo || '(sin código)';
+            sRe.appendChild(new Option(`${a.modelo_nombre || ''} · ${codigo}`, a.id));
+        });
         cRe.style.display = (data && data.length) ? 'block' : 'none';
     } catch (e) { cRe.style.display = 'none'; }
     manejarReemplazo();

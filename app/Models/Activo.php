@@ -248,7 +248,7 @@ class Activo
      */
     public function enTiendaPorDispositivo(int $tiendaId, int $dispositivoId, ?int $exceptoId = null): array
     {
-        $sql = "SELECT a.id, a.serie, a.codigo_barras, a.modelo_id,
+        $sql = "SELECT a.id, a.serie, a.codigo_barras, a.num_activo, a.modelo_id,
                        mo.nombre AS modelo_nombre,
                        d.id      AS dispositivo_id,
                        d.nombre  AS dispositivo_nombre
@@ -265,7 +265,7 @@ class Activo
             $sql .= ' AND a.id <> :excepto';
             $params[':excepto'] = $exceptoId;
         }
-        $sql .= ' ORDER BY mo.nombre, a.serie';
+        $sql .= ' ORDER BY mo.nombre, a.codigo_barras, a.serie';
 
         $stmt = $this->conn->prepare($sql);
         $stmt->execute($params);
