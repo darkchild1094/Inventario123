@@ -12,3 +12,5 @@
 /database/migrations/004_import_activos_maf.up.sql
 /database/migrations/006_codigo_barras_num_activo.up.sql
 /database/migrations/015_import_activos_maf.up.sql
+/database/migrations/017_import_discos_duros_maf.up.sql
+/database/migrations/018_retiro_cctv_verkada_rentec.up.sql
