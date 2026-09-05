@@ -143,6 +143,10 @@ switch ($controllerName) {
         $controller = new \App\Controllers\TiendaController($db);
         break;
 
+    case 'modelo':
+        $controller = new \App\Controllers\ModeloController($db);
+        break;
+
     default:
         $controller = new \App\Controllers\HomeController($db);
         break;

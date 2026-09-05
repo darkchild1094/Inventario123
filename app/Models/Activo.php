@@ -246,7 +246,11 @@ class Activo
      * Activos que actualmente están EN USO en una tienda (stock de esa tienda)
      * y son del mismo tipo de dispositivo. Alimenta el selector "¿Reemplaza a?".
      */
-    public function enTiendaPorDispositivo(int $tiendaId, int $dispositivoId, ?int $exceptoId = null): array
+    /**
+     * Activos 'en_uso' de una tienda para el selector "¿Reemplaza a?".
+     * $dispositivoId null → todas las categorías (reemplazo entre categorías).
+     */
+    public function enTiendaPorDispositivo(int $tiendaId, ?int $dispositivoId = null, ?int $exceptoId = null): array
     {
         $sql = "SELECT a.id, a.serie, a.codigo_barras, a.num_activo, a.modelo_id,
                        mo.nombre AS modelo_nombre,
@@ -260,14 +264,17 @@ class Activo
                 LEFT JOIN dispositivo d ON d.id = mo.dispositivo_id
                 WHERE s.tipo = 'tienda'
                   AND s.tienda_id = :tienda_id
-                  AND d.id = :dispositivo_id
                   AND a.status = 'en_uso'";
-        $params = [':tienda_id' => $tiendaId, ':dispositivo_id' => $dispositivoId];
+        $params = [':tienda_id' => $tiendaId];
+        if ($dispositivoId !== null) {
+            $sql .= ' AND d.id = :dispositivo_id';
+            $params[':dispositivo_id'] = $dispositivoId;
+        }
         if ($exceptoId) {
             $sql .= ' AND a.id <> :excepto';
             $params[':excepto'] = $exceptoId;
         }
-        $sql .= ' ORDER BY mo.nombre, a.codigo_barras, a.serie';
+        $sql .= ' ORDER BY d.nombre, mo.nombre, a.codigo_barras, a.serie';
 
         $stmt = $this->conn->prepare($sql);
         $stmt->execute($params);

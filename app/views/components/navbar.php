@@ -125,6 +125,17 @@
                 <?php endif; ?>
 
                 <?php
+                // ── CATÁLOGO DE MODELOS: solo admin ───────────────────────────
+                if ($tipo === 'admin'): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $ctrl === 'modelo' ? 'active' : '' ?>"
+                           href="index.php?controller=modelo&action=index">
+                            <i class="fas fa-tags me-1"></i> Catálogo
+                        </a>
+                    </li>
+                <?php endif; ?>
+
+                <?php
                 // ── USUARIOS: solo admin ──────────────────────────────────────
                 if ($tipo === 'admin'): ?>
                     <li class="nav-item">

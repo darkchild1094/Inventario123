@@ -274,11 +274,18 @@ if ($stockTipo === 'usuario') {
                             </select>
                         </div>
 
-                        <!-- ¿REEMPLAZA A? (si la tienda ya tiene un activo del mismo dispositivo) -->
+                        <!-- ¿REEMPLAZA A? (si la tienda ya tiene un activo en_uso) -->
                         <div class="col-md-6 campo-condicional" id="campo_reemplazo">
                             <label class="form-label text-warning fw-bold">
                                 <i class="fas fa-right-left me-1"></i> ¿Reemplaza a?
                             </label>
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox"
+                                       id="reemplazo_otra_categoria" onchange="cargarReemplazos()">
+                                <label class="form-check-label small" for="reemplazo_otra_categoria">
+                                    Reemplazar equipo de otra categoría
+                                </label>
+                            </div>
                             <select name="reemplaza_activo_id" id="select_reemplazo" class="form-select"
                                     onchange="manejarReemplazo()">
                                 <option value="">— Ninguno (equipo adicional) —</option>
@@ -477,13 +484,15 @@ const ACTIVO_ID      = <?= (int)$activo['id'] ?>;
 const USUARIO_ACTUAL = <?= (int)$usuarioId ?>;
 const USUARIOS_PLAZA = <?= json_encode(array_map(fn($u) => ['id' => (int)$u['id'], 'nombre' => $u['nombre'], 'tipo' => $u['tipo']], $usuariosPlaza), JSON_UNESCAPED_UNICODE) ?>;
 
-// ── Selector "¿Reemplaza a?": activos del mismo dispositivo ya en esa tienda ──
+// ── Selector "¿Reemplaza a?": activos en_uso de esa tienda (misma categoría, o
+//    todas si se marca "otra categoría") ──
 async function cargarReemplazos() {
     const est    = document.getElementById('estatus').value;
     const tienda = document.getElementById('select_tienda_uso');
     const disp   = document.getElementById('dispositivo');
     const cRe    = document.getElementById('campo_reemplazo');
     const sRe    = document.getElementById('select_reemplazo');
+    const otra   = document.getElementById('reemplazo_otra_categoria');
     if (!cRe || !sRe) return;
 
     if (est !== 'en_uso' || !tienda || !tienda.value || !disp || !disp.value) {
@@ -492,20 +501,25 @@ async function cargarReemplazos() {
         manejarReemplazo();
         return;
     }
+    cRe.style.display = 'block';
+    const dispId = disp.value;
+    const url = `index.php?controller=api&action=obtenerActivosEnTiendaPorDispositivo&tienda_id=${tienda.value}&excepto_id=${ACTIVO_ID}`
+              + (otra && otra.checked ? '' : `&dispositivo_id=${dispId}`);
     try {
-        const r = await fetch(`index.php?controller=api&action=obtenerActivosEnTiendaPorDispositivo&tienda_id=${tienda.value}&dispositivo_id=${disp.value}&excepto_id=${ACTIVO_ID}`);
+        const r = await fetch(url);
         const data = await r.json();
         sRe.innerHTML = '<option value="">— Ninguno (equipo adicional) —</option>';
         (data || []).forEach(a => {
             const marcaModelo = [a.marca_nombre, a.modelo_nombre].filter(Boolean).join(' ');
             const codigo = a.codigo_barras || '(sin código de barras)';
-            const opt = new Option(`${marcaModelo} · ${codigo}`, a.id);
+            const prefijo = (String(a.dispositivo_id) !== String(dispId) && a.dispositivo_nombre)
+                            ? `[${a.dispositivo_nombre}] ` : '';
+            const opt = new Option(`${prefijo}${marcaModelo} · ${codigo}`, a.id);
             opt.dataset.serie = a.serie || '';
             opt.dataset.codigo = a.codigo_barras || '';
             sRe.appendChild(opt);
         });
-        cRe.style.display = (data && data.length) ? 'block' : 'none';
-    } catch (e) { cRe.style.display = 'none'; }
+    } catch (e) { /* deja solo la opción "Ninguno" */ }
     manejarReemplazo();
 }
 

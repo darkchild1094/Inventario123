@@ -200,6 +200,12 @@ class Permisos
         return self::esAdmin();
     }
 
+    /** Puede gestionar el catálogo de modelos (alta / edición / borrado) */
+    public static function puedeGestionarModelos(): bool
+    {
+        return self::esAdmin();
+    }
+
     /**
      * Scope del Historial:
      *   admin       → todo

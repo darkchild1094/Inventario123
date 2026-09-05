@@ -6,6 +6,7 @@ use App\Models\Activo;
 use App\Models\Usuario;
 use App\Models\Dispositivo;
 use App\Models\Modelo;
+use App\Models\Marca;
 use App\Models\Tienda;
 use App\Models\Plaza;
 use App\Models\Region;
@@ -46,6 +47,7 @@ class ApiController
                 'puedeVerBodega'        => Permisos::puedeVerBodega(),
                 'puedeVerHistorial'     => Permisos::puedeVerHistorial(),
                 'puedeGestionarTiendas' => Permisos::puedeGestionarTiendas(),
+                'puedeGestionarModelos' => Permisos::puedeGestionarModelos(),
                 'plazaId'               => Permisos::plazaId(),
                 'plazasIds'             => Permisos::plazasIds(),
             ],
@@ -484,15 +486,112 @@ class ApiController
         $this->json((new Bodega($this->db))->obtenerPorPlaza((int) $_GET['plaza_id']));
     }
 
-    // GET ?action=obtenerActivosEnTiendaPorDispositivo&tienda_id=X&dispositivo_id=Y&excepto_id=Z
-    // Alimenta el selector "¿Reemplaza a?" del formulario de activos.
+    // GET ?action=obtenerActivosEnTiendaPorDispositivo&tienda_id=X[&dispositivo_id=Y]&excepto_id=Z
+    // Alimenta el selector "¿Reemplaza a?". Sin dispositivo_id → todas las categorías.
     public function obtenerActivosEnTiendaPorDispositivo(): void
     {
         $tiendaId      = (int) ($_GET['tienda_id'] ?? 0);
-        $dispositivoId = (int) ($_GET['dispositivo_id'] ?? 0);
+        $dispositivoId = (int) ($_GET['dispositivo_id'] ?? 0) ?: null;
         $exceptoId     = (int) ($_GET['excepto_id'] ?? 0) ?: null;
-        if ($tiendaId <= 0 || $dispositivoId <= 0) { $this->json([]); return; }
+        if ($tiendaId <= 0) { $this->json([]); return; }
         $this->json((new Activo($this->db))->enTiendaPorDispositivo($tiendaId, $dispositivoId, $exceptoId));
+    }
+
+    // ── Catálogo de modelos (solo admin) ──────────────────────────────────
+
+    public function listarModelos(): void
+    {
+        if (!Permisos::puedeGestionarModelos()) { $this->json(['error' => 'forbidden'], 403); return; }
+        $this->json((new Modelo($this->db))->obtenerTodosDetallado());
+    }
+
+    public function obtenerModelo(): void
+    {
+        if (!Permisos::puedeGestionarModelos()) { $this->json(['error' => 'forbidden'], 403); return; }
+        $m = (new Modelo($this->db))->obtenerPorId((int) ($_GET['id'] ?? 0));
+        $this->json($m ?: ['error' => 'not_found'], $m ? 200 : 404);
+    }
+
+    public function guardarModelo(): void
+    {
+        $this->guardarOModelo(null);
+    }
+
+    public function actualizarModelo(): void
+    {
+        $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        $this->guardarOModelo($id ?: null);
+    }
+
+    private function guardarOModelo(?int $id): void
+    {
+        if (!Permisos::puedeGestionarModelos()) { $this->json(['success' => false, 'message' => 'Sin permiso.'], 403); return; }
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+
+        $nombre     = trim((string) ($b['nombre'] ?? ''));
+        $dispId     = (int) ($b['dispositivo_id'] ?? 0);
+        $marcaNueva = trim((string) ($b['marca_nueva'] ?? ''));
+        $marcaId    = (int) ($b['marca_id'] ?? 0) ?: null;
+
+        if ($nombre === '' || $dispId <= 0) {
+            $this->json(['success' => false, 'message' => 'Nombre y categoría de dispositivo son obligatorios.'], 422);
+            return;
+        }
+        if ($marcaNueva !== '') {
+            $marcaId = (new Marca($this->db))->obtenerOCrear($marcaNueva);
+        }
+
+        $modelo = new Modelo($this->db);
+        if ($modelo->existe($nombre, $dispId, $marcaId, $id)) {
+            $this->json(['success' => false, 'message' => 'Ya existe un modelo con esa marca y nombre en esa categoría.'], 409);
+            return;
+        }
+
+        if ($id) {
+            $modelo->actualizar(['id' => $id, 'nombre' => $nombre, 'dispositivo_id' => $dispId, 'marca_id' => $marcaId]);
+            $this->json(['success' => true, 'message' => 'Modelo actualizado.', 'id' => $id]);
+        } else {
+            $nuevo = $modelo->crear(['nombre' => $nombre, 'dispositivo_id' => $dispId, 'marca_id' => $marcaId]);
+            $this->json(['success' => true, 'message' => 'Modelo creado.', 'id' => $nuevo]);
+        }
+    }
+
+    public function eliminarModelo(): void
+    {
+        if (!Permisos::puedeGestionarModelos()) { $this->json(['success' => false, 'message' => 'Sin permiso.'], 403); return; }
+        $this->requerirPost();
+        $b          = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id         = (int) ($b['id'] ?? 0);
+        $reasignarA = (int) ($b['reasignar_a'] ?? 0) ?: null;
+        if ($id <= 0) { $this->json(['success' => false, 'message' => 'Modelo inválido.'], 422); return; }
+
+        $modelo = new Modelo($this->db);
+        if (!$modelo->obtenerPorId($id)) { $this->json(['success' => false, 'message' => 'Modelo no encontrado.'], 404); return; }
+
+        $enUso = $modelo->contarActivos($id);
+        if ($enUso > 0 && !$reasignarA) {
+            $this->json(['success' => false, 'message' => "Sin destino: {$enUso} activos usan este modelo.", 'activos' => $enUso], 409);
+            return;
+        }
+        if ($reasignarA === $id) { $this->json(['success' => false, 'message' => 'El modelo destino debe ser distinto.'], 422); return; }
+
+        try {
+            $this->db->beginTransaction();
+            $movidos = 0;
+            if ($enUso > 0) {
+                if (!$modelo->obtenerPorId($reasignarA)) throw new \RuntimeException('El modelo destino no existe.');
+                $movidos = $modelo->reasignarActivos($id, $reasignarA);
+            }
+            $modelo->eliminar($id);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            $this->json(['success' => false, 'message' => 'No se pudo eliminar: ' . $e->getMessage()], 500);
+            return;
+        }
+        $this->json(['success' => true, 'message' => "Modelo eliminado." . ($movidos ? " {$movidos} activos reasignados." : '')]);
     }
 
     // GET ?action=obtenerAtisPorPlaza&plaza_id=X
