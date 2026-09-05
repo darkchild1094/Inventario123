@@ -367,6 +367,17 @@ foreach ($usuarios as $u) {
                             </select>
                         </div>
 
+                        <!-- MOTIVO DEL MOVIMIENTO (opcional, va al historial) ────────── -->
+                        <div class="col-12">
+                            <label class="form-label">
+                                <i class="fas fa-pen-to-square me-1"></i> Motivo del movimiento
+                                <span class="text-muted fw-normal small">(Opcional)</span>
+                            </label>
+                            <textarea name="motivo" class="form-control" rows="2" maxlength="255"
+                                      placeholder="Ej.: retiro por proyecto Verkada, garantía por falla de lente, reubicación…"></textarea>
+                            <small class="text-muted">Se guarda en el historial junto con este movimiento.</small>
+                        </div>
+
                     </div>
 
                     <!-- ── Fotografías ─────────────────────────────────────── -->
@@ -440,8 +451,9 @@ async function cargarReemplazos() {
         const data = await r.json();
         sRe.innerHTML = '<option value="">— Ninguno (equipo adicional) —</option>';
         (data || []).forEach(a => {
-            const codigo = a.codigo_barras || a.serie || a.num_activo || '(sin código)';
-            sRe.appendChild(new Option(`${a.modelo_nombre || ''} · ${codigo}`, a.id));
+            const marcaModelo = [a.marca_nombre, a.modelo_nombre].filter(Boolean).join(' ');
+            const codigo = a.codigo_barras || '(sin código de barras)';
+            sRe.appendChild(new Option(`${marcaModelo} · ${codigo}`, a.id));
         });
         cRe.style.display = (data && data.length) ? 'block' : 'none';
     } catch (e) { cRe.style.display = 'none'; }

@@ -28,6 +28,22 @@ class MovimientoService
         $this->stockResolver = new StockResolver($db);
     }
 
+    /**
+     * Combina el motivo que escribe el usuario con la nota automática del sistema.
+     * El motivo va primero (es lo que la gente busca en el historial); la nota
+     * automática se conserva como contexto si cabe en varchar(255).
+     */
+    private static function nota(?string $motivo, ?string $auto): ?string
+    {
+        $motivo = trim((string) $motivo);
+        $auto   = trim((string) $auto);
+        if ($motivo === '') {
+            return $auto !== '' ? mb_substr($auto, 0, 255) : null;
+        }
+        $combinada = $auto !== '' ? $motivo . ' — ' . $auto : $motivo;
+        return mb_substr($combinada, 0, 255);
+    }
+
     /** Snapshot mínimo de un activo para datos_json. */
     public static function snapshot(array $a): array
     {
@@ -47,7 +63,7 @@ class MovimientoService
      * @param array|null $antes         Activo::obtenerPorId() ANTES (null = alta)
      * @param array      $despues       Activo::obtenerPorId() DESPUÉS de guardar
      * @param int        $actorId       usuario que ejecuta
-     * @param array      $opts          evento, nota, tienda_id, grupo_id, activo_relacionado_id
+     * @param array      $opts          evento, nota, motivo, tienda_id, grupo_id, activo_relacionado_id
      */
     public function registrarGuardado(?array $antes, array $despues, int $actorId, array $opts = []): void
     {
@@ -76,7 +92,7 @@ class MovimientoService
             'activo_relacionado_id' => $opts['activo_relacionado_id'] ?? null,
             'grupo_id'              => $opts['grupo_id'] ?? null,
             'usuario_id'            => $actorId ?: null,
-            'nota'                  => $opts['nota'] ?? null,
+            'nota'                  => self::nota($opts['motivo'] ?? null, $opts['nota'] ?? null),
             'datos_json'            => self::snapshot($despues),
         ]);
     }
@@ -109,8 +125,9 @@ class MovimientoService
      * @param array $destino  ['status'=>'asignado|en_bodega|garantia|baja',
      *                          'asignado_usuario_id'=>?int, 'ati_usuario_id'=>?int]
      * @param int   $actorId
+     * @param ?string $motivo  motivo del movimiento escrito por el usuario
      */
-    public function ejecutarReemplazo(array $entra, int $saleId, array $destino, int $actorId): void
+    public function ejecutarReemplazo(array $entra, int $saleId, array $destino, int $actorId, ?string $motivo = null): void
     {
         $grupo    = Movimiento::nuevoGrupoId();
         $tiendaId = (int) ($entra['tienda_uso_id'] ?? 0);
@@ -132,7 +149,7 @@ class MovimientoService
             'activo_relacionado_id' => $saleId,
             'grupo_id'              => $grupo,
             'usuario_id'            => $actorId ?: null,
-            'nota'                  => 'Sustituye a la serie ' . ($sale['serie'] ?? '—') . '.',
+            'nota'                  => self::nota($motivo, 'Sustituye a la serie ' . ($sale['serie'] ?? '—') . '.'),
             'datos_json'            => self::snapshot($entra),
         ]);
 
@@ -174,7 +191,7 @@ class MovimientoService
             'activo_relacionado_id' => (int) $entra['id'],
             'grupo_id'              => $grupo,
             'usuario_id'            => $actorId ?: null,
-            'nota'                  => trim('Reemplazado por la serie ' . ($entra['serie'] ?? '—') . '. ' . ($res['nota'] ?? '')),
+            'nota'                  => self::nota($motivo, trim('Reemplazado por la serie ' . ($entra['serie'] ?? '—') . '. ' . ($res['nota'] ?? ''))),
             'datos_json'            => self::snapshot($saleDespues ?: $sale),
         ]);
     }

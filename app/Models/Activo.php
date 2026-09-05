@@ -250,11 +250,13 @@ class Activo
     {
         $sql = "SELECT a.id, a.serie, a.codigo_barras, a.num_activo, a.modelo_id,
                        mo.nombre AS modelo_nombre,
+                       ma.nombre AS marca_nombre,
                        d.id      AS dispositivo_id,
                        d.nombre  AS dispositivo_nombre
                 FROM {$this->table} a
                 JOIN stock       s  ON s.id = a.stock_id
                 LEFT JOIN modelo mo ON mo.id = a.modelo_id
+                LEFT JOIN marca  ma ON ma.id = mo.marca_id
                 LEFT JOIN dispositivo d ON d.id = mo.dispositivo_id
                 WHERE s.tipo = 'tienda'
                   AND s.tienda_id = :tienda_id

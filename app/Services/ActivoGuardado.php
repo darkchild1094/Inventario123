@@ -59,9 +59,11 @@ class ActivoGuardado
             $id      = $this->activo->ultimoId();
             $despues = $this->activo->obtenerPorId($id);
 
+            $motivo = trim((string) ($post['motivo'] ?? '')) ?: null;
             $this->mov->registrarGuardado(null, $despues, (int) $actor['id'], [
                 'tienda_id' => $prep['ctx']['tienda_id'] ?? null,
                 'nota'      => $prep['nota'],
+                'motivo'    => $motivo,
             ]);
 
             $this->procesarReemplazo($despues, $datos['status'], $post, (int) $actor['id']);
@@ -97,9 +99,11 @@ class ActivoGuardado
             }
             $despues = $this->activo->obtenerPorId($id);
 
+            $motivo = trim((string) ($post['motivo'] ?? '')) ?: null;
             $this->mov->registrarGuardado($antes, $despues, (int) $actor['id'], [
                 'tienda_id' => $prep['ctx']['tienda_id'] ?? null,
                 'nota'      => $prep['nota'],
+                'motivo'    => $motivo,
             ]);
 
             $this->procesarReemplazo($despues, $datos['status'], $post, (int) $actor['id']);
@@ -200,11 +204,12 @@ class ActivoGuardado
         if ($status !== 'en_uso' || $reemplazaId <= 0 || $reemplazaId === (int) $entra['id']) {
             return;
         }
+        $motivo = trim((string) ($post['motivo'] ?? '')) ?: null;
         $this->mov->ejecutarReemplazo($entra, $reemplazaId, [
             'status'              => $post['salida_destino'] ?? 'asignado',
             'asignado_usuario_id' => (int) ($post['salida_usuario_id'] ?? 0),
             'ati_usuario_id'      => (int) ($post['salida_ati_usuario_id'] ?? 0),
-        ], $actorId);
+        ], $actorId, $motivo);
     }
 
     private function err(string $msg): array
