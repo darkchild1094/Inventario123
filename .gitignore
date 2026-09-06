@@ -4,6 +4,7 @@
 /.idea/
 /.vscode/
 .DS_Store
+/storage/sessions/
 
 # Volcados de datos reales (inventario, empleados, hashes de password):
 # no deben quedar públicos en el repo. Los .sql de schema (migraciones sin

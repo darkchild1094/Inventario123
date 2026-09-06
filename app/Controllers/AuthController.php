@@ -122,13 +122,17 @@ class AuthController
             return false;
         }
 
-        if (isset($_SESSION['last_activity'])) {
+        // La app móvil (manda X-Session-Id) tiene sesión perpetua: no expira por
+        // inactividad. La web sí conserva su timeout de 30 min.
+        $esApp = isset($_SERVER['HTTP_X_SESSION_ID']);
+
+        if (!$esApp && isset($_SESSION['last_activity'])) {
             if (time() - $_SESSION['last_activity'] > self::SESSION_TIMEOUT) {
                 $this->logout();
                 return false;
             }
-            $_SESSION['last_activity'] = time();
         }
+        $_SESSION['last_activity'] = time();
 
         return true;
     }
