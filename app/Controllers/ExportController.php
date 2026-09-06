@@ -3,9 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\Activo;
-use App\Models\Dispositivo;
-use App\Models\Plaza;
-use App\Models\Tienda;
+use App\Models\Movimiento;
 use App\Helpers\Permisos;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -20,9 +18,12 @@ require_once ROOT_PATH . '/vendor/autoload.php';
 /**
  * ExportController — femsa_assets
  *
- * Genera Excel de inventario:
+ * Genera Excel de inventario (descarga directa, un clic):
  *  - Una pestaña por Negocio-Plaza (activos en bodega)
- *  - Una pestaña por usuario/fs (activos en stock personal)
+ *  - Una pestaña por ingeniero (activos en su stock personal)
+ *  - Una pestaña por ingeniero con su HISTORIAL de movimientos
+ *    (altas, bajas y reemplazos: equipo que entró y el que salió)
+ * Todo acotado al alcance del rol (Permisos::filtrosExportar()).
  */
 class ExportController
 {
@@ -46,38 +47,18 @@ class ExportController
         if (session_status() === PHP_SESSION_NONE) session_start();
     }
 
-    /**
-     * Punto de entrada de "Exportar".
-     *  - Petición del navegador sin marcar → muestra el formulario de filtros.
-     *  - Con ?generar=1 (o desde la app, que manda X-Requested-With) → genera
-     *    el Excel ya acotado por rol + los filtros elegidos.
-     */
+    /** Descarga directa del Excel de inventario, acotado por el rol. */
     public function inventario(): void
     {
         $this->verificarPermisos();
 
-        $esApp    = isset($_SERVER['HTTP_X_REQUESTED_WITH'])
-            && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-        $generar  = $esApp || isset($_GET['generar']);
+        // Catálogos grandes + PhpSpreadsheet: sube el límite para no reventar a los 120 s.
+        @set_time_limit(600);
+        @ini_set('memory_limit', '768M');
 
-        if (!$generar) {
-            $this->mostrarFiltros();
-            return;
-        }
-
-        // No dejes que un catálogo grande reviente por el límite de 120 s / memoria.
-        @set_time_limit(300);
-        @ini_set('memory_limit', '512M');
-
-        $filtros      = $this->filtrosPeticion();
+        $filtros      = Permisos::filtrosExportar();
         $resultado    = (new Activo($this->db))->obtenerTodosFiltrado($filtros, 1, 999_999);
         $listaActivos = $resultado['activos'] ?? [];
-
-        if (empty($listaActivos)) {
-            $_SESSION['error'] = 'No hay activos que coincidan con esos filtros.';
-            header('Location: index.php?controller=export&action=inventario');
-            exit;
-        }
 
         [$activosBodega, $activosUsuario] = $this->agruparActivos($listaActivos);
 
@@ -91,6 +72,7 @@ class ExportController
         $hojaMolde   = clone $hojaBase;
         $esPrimera   = true;
 
+        // 1) una pestaña por bodega (negocio - plaza)
         foreach ($activosBodega as $nombre => $activos) {
             $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
             if (!$esPrimera) $spreadsheet->addSheet($hoja);
@@ -98,91 +80,28 @@ class ExportController
             $esPrimera = false;
         }
 
+        // 2) por cada ingeniero: su stock personal + su historial de movimientos
+        $movModel = new Movimiento($this->db);
         foreach ($activosUsuario as $nombre => $activos) {
             $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
             if (!$esPrimera) $spreadsheet->addSheet($hoja);
             $this->llenarHoja($hoja, $activos, $nombre, true);
             $esPrimera = false;
+
+            $engId = (int) ($activos[0]['usuario_stock_id'] ?? 0);
+            if ($engId > 0) {
+                $movs = $movModel->listar(['usuario_id' => $engId], 1, 100_000)['movimientos'] ?? [];
+                if ($movs) {
+                    $hojaMov = $spreadsheet->createSheet();
+                    $this->llenarHojaMovimientos($hojaMov, $movs, $nombre . ' - MOV');
+                }
+            }
         }
 
         $this->descargarExcel($spreadsheet, 'Inventario_' . date('Y-m-d_H-i') . '.xlsx');
     }
 
     // ── Privados ──────────────────────────────────────────────────────────────
-
-    /** Renderiza el formulario de filtros previo a la exportación. */
-    private function mostrarFiltros(): void
-    {
-        $tipo = Permisos::tipo();
-
-        $dispositivos = (new Dispositivo($this->db))->leerTodos();
-
-        // Plazas / tiendas visibles según el rol.
-        $plazasTodas = (new Plaza($this->db))->obtenerTodas();
-        $tiendasTodas = (new Tienda($this->db))->obtenerTodas();
-
-        if ($tipo === 'admin') {
-            $plazas  = $plazasTodas;
-            $tiendas = $tiendasTodas;
-        } elseif ($tipo === 'coordinador') {
-            $mis     = Permisos::plazasIds() ?: [Permisos::plazaId()];
-            $plazas  = array_values(array_filter($plazasTodas, fn($p) => in_array((int) $p['id'], $mis, true)));
-            $tiendas = array_values(array_filter($tiendasTodas, fn($t) => in_array((int) $t['plaza_id'], $mis, true)));
-        } elseif ($tipo === 'ati') {
-            $pid     = Permisos::plazaId();
-            $plazas  = array_values(array_filter($plazasTodas, fn($p) => (int) $p['id'] === $pid));
-            $tiendas = array_values(array_filter($tiendasTodas, fn($t) => (int) $t['plaza_id'] === $pid));
-        } else { // fs: sólo su stock personal, sin selector de plaza/tienda
-            $plazas  = [];
-            $tiendas = [];
-        }
-
-        $statusOpts = [
-            'en_bodega' => 'En bodega', 'en_uso' => 'En uso',
-            'asignado' => 'Asignado', 'garantia' => 'Garantía', 'baja' => 'Baja',
-        ];
-
-        require ROOT_PATH . '/app/views/export/filtros.php';
-    }
-
-    /**
-     * Filtros efectivos = los elegidos en el formulario ∩ el alcance del rol.
-     * El alcance del rol siempre gana (un coordinador no puede exportar otra plaza).
-     */
-    private function filtrosPeticion(): array
-    {
-        $scope = Permisos::filtrosExportar();
-
-        $elegidos = [];
-        if (!empty($_GET['dispositivo_id'])) $elegidos['dispositivo_id'] = (int) $_GET['dispositivo_id'];
-        if (!empty($_GET['tienda_id']))      $elegidos['tienda_id']      = (int) $_GET['tienda_id'];
-        if (isset($_GET['status']) && $_GET['status'] !== '') {
-            $elegidos['status'] = Activo::normalizarStatus((string) $_GET['status']);
-        }
-        if (trim((string) ($_GET['busqueda'] ?? '')) !== '') {
-            $elegidos['busqueda'] = trim((string) $_GET['busqueda']);
-        }
-
-        // Plaza: sólo se acepta si cae dentro del alcance del rol.
-        if (!empty($_GET['plaza_id'])) {
-            $pedida = (int) $_GET['plaza_id'];
-            if (!isset($scope['plaza_id'])) {
-                $elegidos['plaza_id'] = $pedida;                       // admin
-            } else {
-                $permitidas = array_map('intval', (array) $scope['plaza_id']);
-                if (in_array($pedida, $permitidas, true)) {
-                    $elegidos['plaza_id'] = $pedida;
-                }
-            }
-        }
-
-        // El alcance del rol se aplica al final (sobrescribe lo que haga falta).
-        $filtros = array_merge($elegidos, $scope);
-        if (isset($elegidos['plaza_id'])) {
-            $filtros['plaza_id'] = $elegidos['plaza_id'];              // ya validada arriba
-        }
-        return $filtros;
-    }
 
     private function agruparActivos(array $activos): array
     {
@@ -301,6 +220,83 @@ class ExportController
         }
         $rangos[] = [$ini, $prev];
         return $rangos;
+    }
+
+    /**
+     * Pestaña con el historial de movimientos de un ingeniero: qué dio de alta,
+     * qué dio de baja y, en los reemplazos, el equipo que entró y el que salió.
+     * Formato propio (no usa la plantilla).
+     */
+    private function llenarHojaMovimientos($sheet, array $movs, string $nombre): void
+    {
+        $tab = mb_substr(preg_replace('/[*:\\/\\\\?\[\]—–]/', '-', $nombre), 0, 31);
+        try {
+            $sheet->setTitle($tab);
+        } catch (\Throwable) {
+            $sheet->setTitle(mb_substr($tab, 0, 26) . '_' . rand(10, 99));
+        }
+
+        $enc = ['Fecha', 'Evento', 'Equipo', 'Serie', 'Código', 'N° activo',
+                'Estatus', 'Relación', 'Equipo relacionado', 'Serie rel.',
+                'Código rel.', 'N° activo rel.', 'Nota'];
+        foreach ($enc as $i => $txt) {
+            $sheet->setCellValue([$i + 1, 1], $txt);
+        }
+
+        $labels = Movimiento::EVENTOS;
+        $relLabel = fn(string $ev) => match ($ev) {
+            'reemplazo_entra' => 'Sale (retirado)',
+            'reemplazo_sale'  => 'Entra (instalado)',
+            default           => '',
+        };
+
+        $fila = 2;
+        foreach ($movs as $m) {
+            $eq  = trim(($m['eq_dispositivo'] ?? '') . ' · '
+                 . trim(($m['eq_marca'] ?? '') . ' ' . ($m['eq_modelo'] ?? '')), ' ·');
+            $rel = trim(($m['rel_dispositivo'] ?? '') . ' · '
+                 . trim(($m['rel_marca'] ?? '') . ' ' . ($m['rel_modelo'] ?? '')), ' ·');
+            $estatus = trim(($m['status_anterior'] ?? '—') . ' → ' . ($m['status_nuevo'] ?? '—'), ' →');
+
+            $vals = [
+                substr((string) ($m['creado_en'] ?? ''), 0, 16),
+                $labels[$m['evento']] ?? $m['evento'],
+                $eq,
+                $m['eq_serie'] ?? '',
+                $m['eq_codigo_barras'] ?? '',
+                $m['eq_num_activo'] ?? '',
+                $estatus,
+                $relLabel($m['evento']),
+                $rel,
+                $m['rel_serie'] ?? '',
+                $m['rel_codigo_barras'] ?? '',
+                $m['rel_num_activo'] ?? '',
+                $m['nota'] ?? '',
+            ];
+            foreach ($vals as $i => $v) {
+                $sheet->setCellValue([$i + 1, $fila], $v);
+            }
+            $fila++;
+        }
+        $ultima = $fila - 1;
+
+        // estilo en una pasada
+        $sheet->getStyle("A1:M1")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['argb' => Color::COLOR_WHITE]],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF212529']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+        if ($ultima >= 2) {
+            $sheet->getStyle("A2:M{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+            $sheet->getStyle("A2:M{$ultima}")->getFont()->setName('Century Gothic')->setSize(9);
+        }
+        // Anchos fijos (autoSize sobre muchas filas es un cuello de botella).
+        $anchos = ['A' => 16, 'B' => 18, 'C' => 30, 'D' => 20, 'E' => 14, 'F' => 14,
+                   'G' => 20, 'H' => 16, 'I' => 28, 'J' => 20, 'K' => 14, 'L' => 14, 'M' => 45];
+        foreach ($anchos as $col => $w) {
+            $sheet->getColumnDimension($col)->setWidth($w);
+        }
+        $sheet->freezePane('A2');
     }
 
     private function descargarExcel(Spreadsheet $spreadsheet, string $nombre): never
