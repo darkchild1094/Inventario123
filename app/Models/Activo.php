@@ -323,6 +323,14 @@ class Activo
             }
         }
 
+        // Clave de idempotencia (alta offline reenviada por la app). El índice
+        // UNIQUE la usa para rechazar el reintento como duplicado.
+        if (!empty($datos['idempotency_key'])) {
+            $campos[]              = 'idempotency_key';
+            $placeholders[]        = ':idempotency_key';
+            $params[':idempotency_key'] = substr((string) $datos['idempotency_key'], 0, 64);
+        }
+
         $sql = "INSERT INTO {$this->table} (" . implode(', ', $campos) . ") VALUES (" . implode(', ', $placeholders) . ")";
 
         try {

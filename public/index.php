@@ -28,18 +28,20 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 
-// Soporte para sesión vía Header (móvil) o Cookie (web) o Query Param (debug/móvil)
+// Soporte para sesión vía Header (app móvil). NO se acepta por query string:
+// un ?sid= en la URL termina en logs, historial y cabeceras Referer.
 if (isset($_SERVER['HTTP_X_SESSION_ID'])) {
     session_id($_SERVER['HTTP_X_SESSION_ID']);
-} elseif (isset($_GET['sid'])) {
-    session_id($_GET['sid']);
 }
 
 session_start();
-header("X-Debug-Session-Used: " . session_id());
 
-ini_set('display_errors', 1);
+// Errores: nunca a pantalla en producción (filtra rutas y trazas). Se
+// activan sólo si APP_DEBUG está activo en .env (se lee más abajo, tras el
+// autoload); por ahora, valor seguro.
 error_reporting(E_ALL);
+ini_set('log_errors', '1');
+ini_set('display_errors', '0');
 ini_set('pcre.jit', 0);
 
 date_default_timezone_set('America/Mexico_City');
@@ -78,12 +80,19 @@ try {
     $db       = $database->getConnection();
     if (!$db) throw new Exception('Error de conexión a la base de datos.');
 } catch (Exception $e) {
+    error_log('DB connection: ' . $e->getMessage());
     if (($_GET['controller'] ?? '') === 'api') {
         header('Content-Type: application/json');
-        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        echo json_encode(['status' => 'error', 'message' => 'Error de conexión a la base de datos.']);
         exit;
     }
-    die('Error crítico: ' . $e->getMessage());
+    die('Error crítico: no se pudo conectar a la base de datos.');
+}
+
+// El .env ya está cargado (Database::cargarEnv). En desarrollo se pueden
+// mostrar los errores en pantalla marcando APP_DEBUG=1 en .env.
+if (filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN)) {
+    ini_set('display_errors', '1');
 }
 
 // ── Servir uploads ────────────────────────────────────────────────────────────

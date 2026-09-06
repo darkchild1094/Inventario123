@@ -188,7 +188,24 @@ class ApiController
             $this->json(['success' => false, 'message' => 'No tienes permiso para registrar activos.'], 403);
         }
 
+        // Idempotencia: la app manda una clave única por alta. Un reintento
+        // (respuesta perdida tras un alta exitosa) debe devolver el activo ya
+        // creado, nunca insertar un duplicado. La clave viaja en el INSERT y el
+        // índice UNIQUE la refuerza.
+        $idemKey = substr(trim((string) ($_POST['idempotency_key'] ?? '')), 0, 64) ?: null;
+        $buscarPorClave = function () use ($idemKey): ?int {
+            if ($idemKey === null) return null;
+            $st = $this->db->prepare('SELECT id FROM activo WHERE idempotency_key = :k LIMIT 1');
+            $st->execute([':k' => $idemKey]);
+            $id = $st->fetchColumn();
+            return $id ? (int) $id : null;
+        };
+        if ($ya = $buscarPorClave()) {
+            $this->json(['success' => true, 'message' => 'Activo ya registrado.', 'id' => $ya, 'duplicado' => true]);
+        }
+
         $datos   = $this->datosActivoPost();
+        if ($idemKey !== null) $datos['idempotency_key'] = $idemKey;
         $plazaId = $this->resolverPlazaId((int) ($_POST['negocio_id'] ?? 0));
         if ($plazaId <= 0) {
             $this->json(['success' => false, 'message' => 'Debes indicar una plaza válida.'], 400);
@@ -202,9 +219,13 @@ class ApiController
 
         if ($res['ok']) {
             $this->json(['success' => true, 'message' => 'Activo registrado correctamente.', 'id' => $res['id']]);
-        } else {
-            $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo registrar el activo.'], 400);
         }
+        // Falló el INSERT: si ya hay un activo con esta clave, fue una carrera
+        // entre dos reintentos idénticos → devolvemos el que ganó.
+        if ($ganador = $buscarPorClave()) {
+            $this->json(['success' => true, 'message' => 'Activo ya registrado.', 'id' => $ganador, 'duplicado' => true]);
+        }
+        $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo registrar el activo.'], 400);
     }
 
     public function actualizarActivo(): void
@@ -493,33 +514,58 @@ class ApiController
         $this->json((new Tienda($this->db))->obtenerPorPlaza((int) $_GET['plaza_id']));
     }
 
+    /** admin ve cualquier plaza; el resto sólo las suyas. */
+    private function plazaEnAlcance(int $plazaId): bool
+    {
+        return Permisos::esAdmin()
+            || ($plazaId > 0 && in_array($plazaId, Permisos::misPlazas(), true));
+    }
+
     // GET ?action=obtenerUsuariosPorPlaza&plaza_id=X
     public function obtenerUsuariosPorPlaza(): void
     {
-        if (empty($_GET['plaza_id'])) { $this->json([]); return; }
-        $this->json((new Usuario($this->db))->obtenerPorPlaza((int) $_GET['plaza_id']));
+        $plazaId = (int) ($_GET['plaza_id'] ?? 0);
+        if ($plazaId <= 0 || !$this->plazaEnAlcance($plazaId)) { $this->json([]); return; }
+        $this->json((new Usuario($this->db))->obtenerPorPlaza($plazaId));
     }
 
     // GET ?action=obtenerStockPorUsuario&usuario_id=X&plaza_id=Y
     public function obtenerStockPorUsuario(): void
     {
-        if (empty($_GET['usuario_id'])) { $this->json(null); return; }
-        $plazaId = (int) ($_GET['plaza_id'] ?? 0);
-        $this->json((new Stock($this->db))->obtenerPorUsuario((int) $_GET['usuario_id'], $plazaId));
+        if (!in_array(Permisos::tipo(), ['admin', 'coordinador'], true)) { $this->json(null); return; }
+        $usuarioId = (int) ($_GET['usuario_id'] ?? 0);
+        if ($usuarioId <= 0) { $this->json(null); return; }
+        // El usuario objetivo debe pertenecer a una plaza que el actor administre.
+        if (!Permisos::esAdmin()) {
+            $enAlcance = false;
+            foreach ((new Usuario($this->db))->obtenerPlazas($usuarioId) as $p) {
+                if (in_array((int) $p['id'], Permisos::misPlazas(), true)) { $enAlcance = true; break; }
+            }
+            if (!$enAlcance) { $this->json(null); return; }
+        }
+        $this->json((new Stock($this->db))->obtenerPorUsuario($usuarioId, (int) ($_GET['plaza_id'] ?? 0)));
     }
 
     // GET ?action=obtenerStockPorBodega&bodega_id=X
     public function obtenerStockPorBodega(): void
     {
-        if (empty($_GET['bodega_id'])) { $this->json(null); return; }
-        $this->json((new Stock($this->db))->obtenerPorBodega((int) $_GET['bodega_id']));
+        if (!in_array(Permisos::tipo(), ['admin', 'coordinador', 'ati'], true)) { $this->json(null); return; }
+        $bodegaId = (int) ($_GET['bodega_id'] ?? 0);
+        if ($bodegaId <= 0) { $this->json(null); return; }
+        if (!Permisos::esAdmin()) {
+            $plazasBodega = array_map('intval', array_column(
+                (new Bodega($this->db))->obtenerPlazasDeBodega($bodegaId), 'id'));
+            if (!array_intersect($plazasBodega, Permisos::misPlazas())) { $this->json(null); return; }
+        }
+        $this->json((new Stock($this->db))->obtenerPorBodega($bodegaId));
     }
 
     // GET ?action=obtenerBodegaPorPlaza&plaza_id=X
     public function obtenerBodegaPorPlaza(): void
     {
-        if (empty($_GET['plaza_id'])) { $this->json(null); return; }
-        $this->json((new Bodega($this->db))->obtenerPorPlaza((int) $_GET['plaza_id']));
+        $plazaId = (int) ($_GET['plaza_id'] ?? 0);
+        if ($plazaId <= 0 || !$this->plazaEnAlcance($plazaId)) { $this->json(null); return; }
+        $this->json((new Bodega($this->db))->obtenerPorPlaza($plazaId));
     }
 
     // GET ?action=obtenerActivosEnTiendaPorDispositivo&tienda_id=X[&dispositivo_id=Y]&excepto_id=Z
@@ -530,6 +576,8 @@ class ApiController
         $dispositivoId = (int) ($_GET['dispositivo_id'] ?? 0) ?: null;
         $exceptoId     = (int) ($_GET['excepto_id'] ?? 0) ?: null;
         if ($tiendaId <= 0) { $this->json([]); return; }
+        $tienda = (new Tienda($this->db))->obtenerPorId($tiendaId);
+        if (!$tienda || !$this->plazaEnAlcance((int) $tienda['plaza_id'])) { $this->json([]); return; }
         $this->json((new Activo($this->db))->enTiendaPorDispositivo($tiendaId, $dispositivoId, $exceptoId));
     }
 
@@ -1054,6 +1102,7 @@ class ApiController
             $_SESSION['usuario_nombre'] = $usuario['nombre'];
             $_SESSION['usuario_tipo']   = $tipo;
             $_SESSION['last_activity']  = time();
+            $_SESSION['user_agent']     = $_SERVER['HTTP_USER_AGENT'] ?? '';
             $_SESSION['recordar']       = true; // la app siempre es sesión perpetua
 
             unset($usuario['password']);

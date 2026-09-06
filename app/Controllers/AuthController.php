@@ -154,6 +154,17 @@ class AuthController
             return false;
         }
 
+        // Ligado al User-Agent con el que se inició la sesión: si el cookie /
+        // X-Session-Id se replica desde otro cliente, el UA no coincide y la
+        // sesión se invalida. (Un cambio de UA por actualización del navegador
+        // obliga a volver a entrar; es un coste aceptable en esta herramienta.)
+        $uaActual = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        $uaSesion = $_SESSION['user_agent'] ?? '';
+        if ($uaSesion !== '' && $uaActual !== '' && !hash_equals($uaSesion, $uaActual)) {
+            $this->limpiarSesion();
+            return false;
+        }
+
         // Sin timeout de inactividad para: la app móvil (manda X-Session-Id) y
         // las sesiones web con "Recordarme". El resto expira a las 12 h.
         $sinTimeout = isset($_SERVER['HTTP_X_SESSION_ID']) || !empty($_SESSION['recordar']);
