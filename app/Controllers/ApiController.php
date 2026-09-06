@@ -62,6 +62,36 @@ class ApiController
         ]);
     }
 
+    // GET ?action=resumenDashboard  — KPIs para la pantalla principal de la app.
+    public function resumenDashboard(): void
+    {
+        $resumen = (new Activo($this->db))->resumen(Permisos::filtrosScope());
+        $movs    = (new Movimiento($this->db))->listar(Permisos::filtrosHistorial(), 1, 8)['movimientos'] ?? [];
+
+        $pendTraslados = 0;
+        if (Permisos::puedeAprobarTraslados()) {
+            $pendTraslados = count((new SolicitudTraslado($this->db))->pendientesParaResolver(
+                Permisos::idUsuario(), Permisos::misPlazas(),
+                in_array(Permisos::tipo(), ['coordinador', 'admin'], true),
+                in_array(Permisos::tipo(), ['ati', 'admin'], true),
+                Permisos::esAdmin()));
+        }
+
+        $this->json([
+            'total'            => $resumen['total'],
+            'por_status'       => $resumen['por_status'],
+            'por_dispositivo'  => $resumen['por_dispositivo'],
+            'por_plaza'        => $resumen['por_plaza'],
+            'traslados_pendientes' => $pendTraslados,
+            'movimientos'      => array_map(fn($m) => [
+                'evento'      => $m['evento'],
+                'creado_en'   => $m['creado_en'],
+                'equipo'      => trim(($m['eq_dispositivo'] ?? '') . ' ' . trim(($m['eq_marca'] ?? '') . ' ' . ($m['eq_modelo'] ?? ''))),
+                'serie'       => $m['eq_serie'] ?? $m['eq_codigo_barras'] ?? $m['eq_num_activo'] ?? null,
+            ], $movs),
+        ]);
+    }
+
     // ── Activos ───────────────────────────────────────────────────────────────
 
     public function listarActivos(): void
