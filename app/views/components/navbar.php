@@ -104,6 +104,31 @@
                 <?php endif; ?>
 
                 <?php
+                // ── TRASLADOS (solicitud a bodega con doble firma): fs, coordinador, admin ──
+                if (in_array($tipo, ['fs', 'coordinador', 'admin'])):
+                    global $db;
+                    $pendTraslados = 0;
+                    if (in_array($tipo, ['coordinador', 'admin']) && isset($db) && $db instanceof \PDO) {
+                        try {
+                            $stm = new \App\Models\SolicitudTraslado($db);
+                            $pendTraslados = $tipo === 'admin'
+                                ? $stm->contarPendientesTodas()
+                                : $stm->contarPendientesPorPlazas(\App\Helpers\Permisos::misPlazas());
+                        } catch (\Throwable $e) { $pendTraslados = 0; }
+                    }
+                    ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $ctrl === 'solicitud' ? 'active' : '' ?>"
+                           href="index.php?controller=solicitud&action=index">
+                            <i class="fas fa-right-left me-1"></i> Traslados
+                            <?php if ($pendTraslados > 0): ?>
+                                <span class="badge rounded-pill bg-warning text-dark ms-1"><?= (int) $pendTraslados ?></span>
+                            <?php endif; ?>
+                        </a>
+                    </li>
+                <?php endif; ?>
+
+                <?php
                 // ── TIENDAS (ATI responsable): solo admin ─────────────────────
                 if ($tipo === 'admin'): ?>
                     <li class="nav-item">

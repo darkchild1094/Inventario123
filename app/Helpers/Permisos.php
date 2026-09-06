@@ -206,6 +206,39 @@ class Permisos
         return self::esAdmin();
     }
 
+    // ── Solicitudes de traslado a bodega (doble firma) ────────────────────────
+
+    /** Puede crear una solicitud de traslado (mandar su stock 'asignado' a bodega). */
+    public static function puedeCrearSolicitudTraslado(): bool
+    {
+        return self::esFs();
+    }
+
+    /** Puede aprobar / rechazar solicitudes de traslado. */
+    public static function puedeAprobarTraslados(): bool
+    {
+        return in_array(self::tipo(), ['coordinador', 'admin'], true);
+    }
+
+    /** Puede ver la pantalla de Traslados (fs, coordinador, admin). */
+    public static function puedeVerTraslados(): bool
+    {
+        return in_array(self::tipo(), ['fs', 'coordinador', 'admin'], true);
+    }
+
+    /**
+     * Plazas sobre las que el usuario puede aprobar traslados.
+     * admin → [] (todas, sin filtro); coordinador → sus plazas; otros → [-1].
+     */
+    public static function plazasParaAprobar(): array
+    {
+        return match (self::tipo()) {
+            'admin'       => [],
+            'coordinador' => self::misPlazas(),
+            default       => [-1],
+        };
+    }
+
     /**
      * Scope del Historial:
      *   admin       → todo

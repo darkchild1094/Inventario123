@@ -127,6 +127,16 @@ class ActivoGuardado
     {
         $status  = Activo::normalizarStatus($datos['status'] ?? 'en_bodega');
         $tipo    = $actor['tipo'] ?? '';
+
+        // Activo con una solicitud de traslado 'pendiente' → bloqueado hasta
+        // que el coordinador la resuelva (aprobar/rechazar) o el ingeniero la cancele.
+        if ($antes !== null && !empty($antes['id'])) {
+            $enPendiente = (new \App\Models\SolicitudTraslado($this->db))
+                ->activosEnSolicitudPendiente([(int) $antes['id']]);
+            if ($enPendiente) {
+                return $this->err('Este activo tiene una solicitud de traslado pendiente de aprobación; no se puede modificar hasta resolverla.');
+            }
+        }
         $actorId = (int) ($actor['id'] ?? 0);
         $misPlazas = array_map('intval', $actor['plazas'] ?? []);
         if (!$misPlazas && !empty($actor['plaza_id'])) $misPlazas = [(int) $actor['plaza_id']];
@@ -176,6 +186,11 @@ class ActivoGuardado
             }
             $ctx['asignado_usuario_id'] = $destino;
         } elseif ($status === 'en_bodega') {
+            // Un ingeniero (fs) NO puede mandar su stock 'asignado' a bodega
+            // directo: debe pasar por una Solicitud de traslado (doble firma).
+            if ($tipo === 'fs' && ($antes['status'] ?? null) === 'asignado') {
+                return $this->err('Para mandar equipo a bodega usa una Solicitud de traslado (requiere la firma del coordinador).');
+            }
             $destino = trim((string) ($post['stock_destino'] ?? ''));
             if ($destino !== '' && str_starts_with($destino, 'bodega_') && in_array($tipo, ['admin', 'coordinador'], true)) {
                 $ctx['bodega_id'] = (int) explode('_', $destino, 2)[1];

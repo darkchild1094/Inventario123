@@ -172,6 +172,10 @@ switch ($controllerName) {
         $controller = new \App\Controllers\ModeloController($db);
         break;
 
+    case 'solicitud':
+        $controller = new \App\Controllers\SolicitudTrasladoController($db);
+        break;
+
     default:
         $controller = new \App\Controllers\HomeController($db);
         break;

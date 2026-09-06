@@ -15,8 +15,11 @@ use App\Models\Bodega;
 use App\Models\Stock;
 use App\Models\Area;
 use App\Models\Movimiento;
+use App\Models\SolicitudTraslado;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
+use App\Services\TrasladoService;
+use App\Helpers\ImageHelper;
 use App\Helpers\Permisos;
 
 class ApiController
@@ -48,6 +51,9 @@ class ApiController
                 'puedeVerHistorial'     => Permisos::puedeVerHistorial(),
                 'puedeGestionarTiendas' => Permisos::puedeGestionarTiendas(),
                 'puedeGestionarModelos' => Permisos::puedeGestionarModelos(),
+                'puedeCrearSolicitudTraslado' => Permisos::puedeCrearSolicitudTraslado(),
+                'puedeAprobarTraslados' => Permisos::puedeAprobarTraslados(),
+                'puedeVerTraslados'     => Permisos::puedeVerTraslados(),
                 'plazaId'               => Permisos::plazaId(),
                 'plazasIds'             => Permisos::plazasIds(),
             ],
@@ -592,6 +598,230 @@ class ApiController
             return;
         }
         $this->json(['success' => true, 'message' => "Modelo eliminado." . ($movidos ? " {$movidos} activos reasignados." : '')]);
+    }
+
+    // ── Solicitudes de traslado a bodega (doble firma) ────────────────────────
+
+    // GET ?action=listarSolicitudes[&estado=pendiente]
+    public function listarSolicitudes(): void
+    {
+        if (!Permisos::puedeVerTraslados()) {
+            $this->json(['success' => false, 'message' => 'Sin acceso a Traslados.'], 403);
+        }
+        $model  = new SolicitudTraslado($this->db);
+        $estado = $_GET['estado'] ?? null;
+        $estado = isset(SolicitudTraslado::ESTADOS[$estado]) ? $estado : null;
+
+        if (Permisos::puedeAprobarTraslados()) {
+            $solicitudes = Permisos::esAdmin()
+                ? $model->listarTodas($estado)
+                : $model->listarPorPlazas(Permisos::misPlazas(), $estado);
+        } else {
+            $solicitudes = $model->listarDeUsuario(Permisos::idUsuario());
+        }
+        $this->json([
+            'solicitudes'      => $solicitudes,
+            'puedeAprobar'     => Permisos::puedeAprobarTraslados(),
+            'puedeCrear'       => Permisos::puedeCrearSolicitudTraslado(),
+        ]);
+    }
+
+    // GET ?action=obtenerSolicitud&id=X
+    public function obtenerSolicitud(): void
+    {
+        if (!Permisos::puedeVerTraslados()) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $id  = (int) ($_GET['id'] ?? 0);
+        $model = new SolicitudTraslado($this->db);
+        $sol   = $model->obtenerPorId($id);
+        if (!$sol) {
+            $this->json(['success' => false, 'message' => 'Solicitud no encontrada.'], 404);
+        }
+        if (!$this->puedeVerSolicitud($sol)) {
+            $this->json(['success' => false, 'message' => 'Sin acceso a esta solicitud.'], 403);
+        }
+        $sol['activos']       = $model->activosDe($id);
+        $sol['puedeResolver'] = $this->puedeResolverSolicitud($sol);
+        $sol['puedeCancelar'] = $sol['estado'] === 'pendiente'
+            && in_array(Permisos::idUsuario(), [(int) $sol['solicitante_id'], (int) $sol['origen_usuario_id']], true);
+        $this->json($sol);
+    }
+
+    // POST (multipart) ?action=crearSolicitud   activos[]=, destino_bodega_id=, nota=, firma=<file>
+    public function crearSolicitud(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeCrearSolicitudTraslado()) {
+            $this->json(['success' => false, 'message' => 'Solo los ingenieros de campo pueden crear solicitudes.'], 403);
+        }
+
+        $userId   = Permisos::idUsuario();
+        $plazaId  = Permisos::plazaId();
+        $activos  = array_values(array_unique(array_map('intval', $_POST['activos'] ?? [])));
+        $bodegaId = (int) ($_POST['destino_bodega_id'] ?? 0);
+        $nota     = trim((string) ($_POST['nota'] ?? ''));
+
+        if (!$activos)      $this->json(['success' => false, 'message' => 'Selecciona al menos un activo.'], 400);
+        if ($bodegaId <= 0) $this->json(['success' => false, 'message' => 'Selecciona la bodega destino.'], 400);
+
+        $validos = array_map('intval', array_column($this->activosAsignadosDe($userId), 'id'));
+        foreach ($activos as $aid) {
+            if (!in_array($aid, $validos, true)) {
+                $this->json(['success' => false, 'message' => 'Un activo no está en tu stock personal o ya no está asignado.'], 400);
+            }
+        }
+
+        $model = new SolicitudTraslado($this->db);
+        if ($model->activosEnSolicitudPendiente($activos)) {
+            $this->json(['success' => false, 'message' => 'Un activo ya está en otra solicitud pendiente.'], 409);
+        }
+
+        $bodegasOk = array_map('intval', array_column($this->bodegasDePlazaApi($plazaId), 'id'));
+        if (!in_array($bodegaId, $bodegasOk, true)) {
+            $this->json(['success' => false, 'message' => 'La bodega no pertenece a tu plaza.'], 400);
+        }
+
+        $firma = ImageHelper::guardarFirma('firma', 'firma_sol');
+        if (!$firma) {
+            $this->json(['success' => false, 'message' => 'Falta tu firma o no se pudo procesar.'], 400);
+        }
+
+        $id = $model->crear([
+            'plaza_id'          => $plazaId,
+            'origen_usuario_id' => $userId,
+            'destino_bodega_id' => $bodegaId,
+            'solicitante_id'    => $userId,
+            'firma_solicitante' => $firma,
+            'nota'              => $nota,
+            'grupo_id'          => Movimiento::nuevoGrupoId(),
+            'activos'           => $activos,
+        ]);
+
+        if ($id <= 0) {
+            $this->json(['success' => false, 'message' => 'No se pudo crear la solicitud.'], 500);
+        }
+        $this->json(['success' => true, 'message' => 'Solicitud enviada.', 'id' => $id]);
+    }
+
+    // POST (multipart) ?action=aprobarSolicitud   id=, firma=<file>
+    public function aprobarSolicitud(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeAprobarTraslados()) {
+            $this->json(['success' => false, 'message' => 'Sin permiso para aprobar.'], 403);
+        }
+        $id    = (int) ($_POST['id'] ?? 0);
+        $model = new SolicitudTraslado($this->db);
+        $sol   = $model->obtenerPorId($id);
+        if (!$sol || $sol['estado'] !== 'pendiente') {
+            $this->json(['success' => false, 'message' => 'La solicitud no está pendiente.'], 409);
+        }
+        if (!$this->puedeResolverSolicitud($sol)) {
+            $this->json(['success' => false, 'message' => 'No puedes resolver solicitudes de esa plaza.'], 403);
+        }
+        $firma = ImageHelper::guardarFirma('firma', 'firma_apr');
+        if (!$firma) {
+            $this->json(['success' => false, 'message' => 'Falta tu firma o no se pudo procesar.'], 400);
+        }
+
+        try {
+            $this->db->beginTransaction();
+            if (!$model->marcarAprobada($id, Permisos::idUsuario(), $firma)) {
+                throw new \RuntimeException('La solicitud cambió de estado.');
+            }
+            (new TrasladoService($this->db))->ejecutar($id, Permisos::idUsuario());
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            $this->json(['success' => false, 'message' => 'No se pudo aprobar: ' . $e->getMessage()], 500);
+        }
+        $this->json(['success' => true, 'message' => 'Solicitud aprobada. Activos en bodega.']);
+    }
+
+    // POST ?action=rechazarSolicitud   id=, motivo=
+    public function rechazarSolicitud(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeAprobarTraslados()) {
+            $this->json(['success' => false, 'message' => 'Sin permiso.'], 403);
+        }
+        $b      = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id     = (int) ($b['id'] ?? 0);
+        $motivo = trim((string) ($b['motivo'] ?? ''));
+        $model  = new SolicitudTraslado($this->db);
+        $sol    = $model->obtenerPorId($id);
+        if (!$sol || $sol['estado'] !== 'pendiente') {
+            $this->json(['success' => false, 'message' => 'La solicitud no está pendiente.'], 409);
+        }
+        if (!$this->puedeResolverSolicitud($sol)) {
+            $this->json(['success' => false, 'message' => 'No puedes resolver solicitudes de esa plaza.'], 403);
+        }
+        if ($motivo === '') {
+            $this->json(['success' => false, 'message' => 'Indica el motivo del rechazo.'], 400);
+        }
+        if (!$model->marcarRechazada($id, Permisos::idUsuario(), $motivo)) {
+            $this->json(['success' => false, 'message' => 'No se pudo rechazar.'], 500);
+        }
+        $this->json(['success' => true, 'message' => 'Solicitud rechazada.']);
+    }
+
+    // POST ?action=cancelarSolicitud   id=
+    public function cancelarSolicitud(): void
+    {
+        $this->requerirPost();
+        $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        if (!(new SolicitudTraslado($this->db))->marcarCancelada($id, Permisos::idUsuario())) {
+            $this->json(['success' => false, 'message' => 'No se pudo cancelar (solo el solicitante, y solo si está pendiente).'], 400);
+        }
+        $this->json(['success' => true, 'message' => 'Solicitud cancelada.']);
+    }
+
+    // GET ?action=contarSolicitudesPendientes
+    public function contarSolicitudesPendientes(): void
+    {
+        $model = new SolicitudTraslado($this->db);
+        $n = 0;
+        if (Permisos::puedeAprobarTraslados()) {
+            $n = Permisos::esAdmin()
+                ? $model->contarPendientesTodas()
+                : $model->contarPendientesPorPlazas(Permisos::misPlazas());
+        }
+        $this->json(['pendientes' => $n]);
+    }
+
+    private function activosAsignadosDe(int $usuarioId): array
+    {
+        $res = (new Activo($this->db))->obtenerTodosFiltrado([
+            'stock_usuario_id' => $usuarioId,
+            'status'           => 'asignado',
+        ], 1, 1000);
+        return $res['activos'] ?? [];
+    }
+
+    private function bodegasDePlazaApi(int $plazaId): array
+    {
+        $bModel = new Bodega($this->db);
+        $out = [];
+        if ($oxxo = $bModel->obtenerPorPlazaYNegocio($plazaId, 'oxxo')) $out[(int) $oxxo['id']] = $oxxo;
+        if ($any  = $bModel->obtenerPorPlaza($plazaId))                 $out[(int) $any['id']] = $out[(int) $any['id']] ?? $any;
+        return array_values($out);
+    }
+
+    private function puedeVerSolicitud(array $sol): bool
+    {
+        if (Permisos::esAdmin()) return true;
+        $uid = Permisos::idUsuario();
+        if (in_array($uid, [(int) $sol['solicitante_id'], (int) $sol['origen_usuario_id']], true)) return true;
+        return Permisos::puedeAprobarTraslados()
+            && in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
+    }
+
+    private function puedeResolverSolicitud(array $sol): bool
+    {
+        if (!Permisos::puedeAprobarTraslados() || $sol['estado'] !== 'pendiente') return false;
+        return Permisos::esAdmin() || in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
     }
 
     // GET ?action=obtenerAtisPorPlaza&plaza_id=X

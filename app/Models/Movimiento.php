@@ -43,7 +43,8 @@ class Movimiento
         $campos = [
             'activo_id', 'evento', 'status_anterior', 'status_nuevo',
             'stock_anterior_id', 'stock_nuevo_id', 'tienda_id', 'plaza_id',
-            'activo_relacionado_id', 'grupo_id', 'usuario_id', 'nota', 'datos_json',
+            'activo_relacionado_id', 'grupo_id', 'solicitud_traslado_id',
+            'usuario_id', 'nota', 'datos_json',
         ];
 
         $cols = [];

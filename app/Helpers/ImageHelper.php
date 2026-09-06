@@ -248,6 +248,79 @@ class ImageHelper
         return ['valido' => true, 'error' => null];
     }
 
+    // ── Firmas digitales (canvas → PNG) ───────────────────────────────────────
+
+    /** Carpeta de firmas (relativa a public/). */
+    private const FIRMAS_DIR = 'uploads/firmas';
+
+    /** Límite de una firma dibujada: 800 KB de dataURL / archivo. */
+    private const MAX_FIRMA_BYTES = 819_200;
+
+    /**
+     * Guarda una firma dibujada. Acepta:
+     *   - un dataURL "data:image/png;base64,...." (web),
+     *   - o el nombre de un campo de $_FILES (app, multipart).
+     * Devuelve el nombre del archivo guardado (dentro de uploads/firmas/), o null.
+     */
+    public static function guardarFirma(string $valorOCampo, string $prefijo = 'firma'): ?string
+    {
+        $dir = self::rutaSegura(ROOT_PATH . '/public/' . self::FIRMAS_DIR);
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            error_log('ImageHelper::guardarFirma: no se pudo crear ' . $dir);
+            return null;
+        }
+
+        // ¿Multipart?
+        if (isset($_FILES[$valorOCampo]) && ($_FILES[$valorOCampo]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+            $file = $_FILES[$valorOCampo];
+            if (($file['size'] ?? 0) > self::MAX_FIRMA_BYTES) {
+                return null;
+            }
+            $val = self::validarImagen($file, self::MAX_FIRMA_BYTES);
+            if (!$val['valido']) {
+                error_log('ImageHelper::guardarFirma multipart: ' . $val['error']);
+                return null;
+            }
+            $nombre = $prefijo . '_' . uniqid() . '.png';
+            $dest   = $dir . '/' . $nombre;
+            if (move_uploaded_file($file['tmp_name'], $dest) || copy($file['tmp_name'], $dest)) {
+                return $nombre;
+            }
+            return null;
+        }
+
+        // dataURL base64
+        return self::guardarFirmaBase64($valorOCampo, $prefijo);
+    }
+
+    /** Guarda un dataURL PNG/JPEG base64 en uploads/firmas/. Devuelve el nombre o null. */
+    public static function guardarFirmaBase64(string $dataUrl, string $prefijo = 'firma'): ?string
+    {
+        if (!preg_match('#^data:image/(png|jpeg);base64,#', $dataUrl, $m)) {
+            return null;
+        }
+        $b64 = substr($dataUrl, strpos($dataUrl, ',') + 1);
+        if (strlen($b64) > self::MAX_FIRMA_BYTES * 1.4) { // margen por el overhead base64
+            return null;
+        }
+        $bin = base64_decode($b64, true);
+        if ($bin === false || strlen($bin) < 64 || strlen($bin) > self::MAX_FIRMA_BYTES) {
+            return null;
+        }
+
+        $dir = self::rutaSegura(ROOT_PATH . '/public/' . self::FIRMAS_DIR);
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return null;
+        }
+
+        $ext    = $m[1] === 'jpeg' ? 'jpg' : 'png';
+        $nombre = $prefijo . '_' . uniqid() . '.' . $ext;
+        if (file_put_contents($dir . '/' . $nombre, $bin) === false) {
+            return null;
+        }
+        return $nombre;
+    }
+
     // ── Internos ──────────────────────────────────────────────────────────────
 
     /**
