@@ -377,4 +377,73 @@ class Activo
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         return $stmt->execute();
     }
+
+    /**
+     * Resumen para el dashboard: totales por estatus, por tipo de dispositivo y
+     * por plaza, acotados por los mismos filtros de scope de rol que usa el
+     * listado (plaza_id int|int[], stock_usuario_id).
+     *
+     * @return array{total:int, por_status:array<string,int>, por_dispositivo:array, por_plaza:array}
+     */
+    public function resumen(array $filtros = []): array
+    {
+        $from = "FROM {$this->table} a
+                 LEFT JOIN modelo      mo  ON a.modelo_id       = mo.id
+                 LEFT JOIN dispositivo d   ON mo.dispositivo_id = d.id
+                 LEFT JOIN stock       s   ON a.stock_id        = s.id
+                 LEFT JOIN usuario     u   ON s.usuario_id      = u.id
+                 LEFT JOIN bodega      b   ON s.bodega_id       = b.id
+                 LEFT JOIN tienda      ts  ON s.tienda_id       = ts.id
+                 LEFT JOIN bodega_acceso_plaza bap ON bap.bodega_id = b.id
+                 LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, ts.plaza_id, bap.plaza_id, u.plaza_id) = p.id
+                 WHERE 1=1";
+        $params = [];
+
+        if (isset($filtros['plaza_id']) && $filtros['plaza_id'] !== null && $filtros['plaza_id'] !== '') {
+            $plazas = array_values(array_filter(array_map('intval', (array) $filtros['plaza_id'])));
+            if ($plazas) {
+                $ph = [];
+                foreach ($plazas as $i => $pid) { $ph[] = ":p{$i}"; $params[":p{$i}"] = $pid; }
+                $from .= ' AND p.id IN (' . implode(',', $ph) . ')';
+            } else {
+                $from .= ' AND 1=0';
+            }
+        }
+        if (!empty($filtros['stock_usuario_id'])) {
+            $from .= " AND s.tipo = 'usuario' AND s.usuario_id = :suid";
+            $params[':suid'] = (int) $filtros['stock_usuario_id'];
+        }
+
+        $run = function (string $sql) use ($params) {
+            $st = $this->conn->prepare($sql);
+            $st->execute($params);
+            return $st->fetchAll(PDO::FETCH_ASSOC);
+        };
+
+        // Por estatus (siempre las 5 claves presentes)
+        $porStatus = ['en_uso' => 0, 'en_bodega' => 0, 'asignado' => 0, 'garantia' => 0, 'baja' => 0];
+        foreach ($run("SELECT a.status st, COUNT(*) n {$from} GROUP BY a.status") as $r) {
+            $porStatus[$r['st']] = (int) $r['n'];
+        }
+        $total = array_sum($porStatus);
+
+        $porDispositivo = array_map(
+            fn($r) => ['nombre' => $r['nom'] ?: 'Sin categoría', 'n' => (int) $r['n']],
+            $run("SELECT COALESCE(d.nombre,'') nom, COUNT(*) n {$from}
+                  GROUP BY d.nombre ORDER BY n DESC LIMIT 12")
+        );
+
+        $porPlaza = array_map(
+            fn($r) => ['nombre' => $r['nom'] ?: 'Sin plaza', 'n' => (int) $r['n']],
+            $run("SELECT COALESCE(p.nombre,'') nom, COUNT(*) n {$from}
+                  GROUP BY p.nombre ORDER BY n DESC LIMIT 12")
+        );
+
+        return [
+            'total'           => $total,
+            'por_status'      => $porStatus,
+            'por_dispositivo' => $porDispositivo,
+            'por_plaza'       => $porPlaza,
+        ];
+    }
 }

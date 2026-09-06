@@ -113,6 +113,14 @@ $authController = new \App\Controllers\AuthController($db);
 $controllerName = $_GET['controller'] ?? 'home';
 $action         = $_GET['action']     ?? 'index';
 
+// Pantalla principal = dashboard. El listado sigue en 'home' con ?vista=.
+if ($controllerName === 'home' && $action === 'index'
+    && !isset($_GET['vista']) && !isset($_GET['dispositivo_id'])
+    && !isset($_GET['status']) && !isset($_GET['busqueda'])
+    && !isset($_GET['pagina']) && !isset($_GET['negocio_id']) && !isset($_GET['plaza_id'])) {
+    $controllerName = 'dashboard';
+}
+
 $rutasPublicas = [
     'auth' => ['mostrarLogin', 'login', 'logout'],
     'api'  => ['login'],
@@ -174,6 +182,10 @@ switch ($controllerName) {
 
     case 'solicitud':
         $controller = new \App\Controllers\SolicitudTrasladoController($db);
+        break;
+
+    case 'dashboard':
+        $controller = new \App\Controllers\DashboardController($db);
         break;
 
     default:
