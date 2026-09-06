@@ -87,6 +87,13 @@ class TrasladoService
                 'stock_id'              => $stockDestinoId,
             ]);
 
+            // Activo::actualizar hace trim(serie ?? '') y convertiría un NULL en ''.
+            // Restauramos el NULL para no ensuciar el dato (migración 019).
+            if ($antes['serie'] === null) {
+                $this->db->prepare("UPDATE activo SET serie = NULL WHERE id = :id AND serie = ''")
+                    ->execute([':id' => (int) $antes['id']]);
+            }
+
             $despues = $this->activo->obtenerPorId((int) $antes['id']);
 
             $this->mov->registrar([
