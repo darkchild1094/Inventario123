@@ -23,6 +23,9 @@ require_once ROOT_PATH . '/vendor/autoload.php';
  *  - Una pestaña por ingeniero (activos en su stock personal)
  *  - Una pestaña por ingeniero con su HISTORIAL de movimientos
  *    (altas, bajas y reemplazos: equipo que entró y el que salió)
+ *  - Una pestaña por tienda, SÓLO con los activos "en uso" cuyo origen o
+ *    traspaso vino de bodega. Los que están en la tienda por otra vía
+ *    (import directo, movidos por el ATI, tienda→tienda) no se exportan.
  * Todo acotado al alcance del rol (Permisos::filtrosExportar()).
  */
 class ExportController
@@ -60,7 +63,7 @@ class ExportController
         $resultado    = (new Activo($this->db))->obtenerTodosFiltrado($filtros, 1, 999_999);
         $listaActivos = $resultado['activos'] ?? [];
 
-        [$activosBodega, $activosUsuario] = $this->agruparActivos($listaActivos);
+        [$activosBodega, $activosUsuario, $activosTienda] = $this->agruparActivos($listaActivos);
 
         $rutaPlantilla = ROOT_PATH . '/storage/templates/inventario_bodega.xlsx';
         if (!file_exists($rutaPlantilla)) {
@@ -76,7 +79,7 @@ class ExportController
         foreach ($activosBodega as $nombre => $activos) {
             $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
             if (!$esPrimera) $spreadsheet->addSheet($hoja);
-            $this->llenarHoja($hoja, $activos, $nombre, false);
+            $this->llenarHoja($hoja, $activos, $nombre, 'bodega');
             $esPrimera = false;
         }
 
@@ -85,7 +88,7 @@ class ExportController
         foreach ($activosUsuario as $nombre => $activos) {
             $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
             if (!$esPrimera) $spreadsheet->addSheet($hoja);
-            $this->llenarHoja($hoja, $activos, $nombre, true);
+            $this->llenarHoja($hoja, $activos, $nombre, 'usuario');
             $esPrimera = false;
 
             $engId = (int) ($activos[0]['usuario_stock_id'] ?? 0);
@@ -98,6 +101,16 @@ class ExportController
             }
         }
 
+        // 3) una pestaña por tienda — SÓLO con los activos "en uso" cuyo origen o
+        //    traspaso vino de bodega. Los que están en la tienda por otra vía
+        //    (importados directo, movidos por el ATI, tienda→tienda) se omiten.
+        foreach ($activosTienda as $nombre => $activos) {
+            $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
+            if (!$esPrimera) $spreadsheet->addSheet($hoja);
+            $this->llenarHoja($hoja, $activos, $nombre, 'tienda');
+            $esPrimera = false;
+        }
+
         $this->descargarExcel($spreadsheet, 'Inventario_' . date('Y-m-d_H-i') . '.xlsx');
     }
 
@@ -107,21 +120,68 @@ class ExportController
     {
         $porBodega  = [];
         $porUsuario = [];
+        $porTienda  = [];
+
+        // Activos que en algún momento salieron de una bodega (origen / traspaso).
+        $idsTienda = [];
+        foreach ($activos as $a) {
+            if (($a['stock_tipo'] ?? '') === 'tienda') {
+                $idsTienda[] = (int) $a['id'];
+            }
+        }
+        $conOrigenBodega = $idsTienda ? $this->activosConOrigenBodega($idsTienda) : [];
 
         foreach ($activos as $a) {
-            if ($a['stock_tipo'] === 'bodega') {
-                $clave = $this->claveUbicacion($a);
-                $porBodega[$clave][] = $a;
-            } else {
-                $clave = $this->claveUsuario($a);
-                $porUsuario[$clave][] = $a;
+            $st = $a['stock_tipo'] ?? '';
+            if ($st === 'bodega') {
+                $porBodega[$this->claveUbicacion($a)][] = $a;
+            } elseif ($st === 'tienda') {
+                // Sólo se exportan los activos de tienda con origen en bodega.
+                if (isset($conOrigenBodega[(int) $a['id']])) {
+                    $porTienda[$this->claveTienda($a)][] = $a;
+                }
+            } else { // 'usuario' — stock personal de un ingeniero
+                $porUsuario[$this->claveUsuario($a)][] = $a;
             }
         }
 
         ksort($porBodega);
         ksort($porUsuario);
+        ksort($porTienda);
 
-        return [$porBodega, $porUsuario];
+        return [$porBodega, $porUsuario, $porTienda];
+    }
+
+    /**
+     * De una lista de ids, cuáles tienen al menos un movimiento cuyo stock
+     * ANTERIOR era una bodega (es decir: llegaron a la tienda desde bodega).
+     * @return array<int,true>  mapa id => true
+     */
+    private function activosConOrigenBodega(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if (!$ids) return [];
+
+        $out = [];
+        foreach (array_chunk($ids, 1000) as $lote) {
+            $ph  = implode(',', array_fill(0, count($lote), '?'));
+            $sql = "SELECT DISTINCT m.activo_id
+                    FROM movimiento m
+                    JOIN stock s ON s.id = m.stock_anterior_id
+                    WHERE s.tipo = 'bodega' AND m.activo_id IN ({$ph})";
+            $st = $this->db->prepare($sql);
+            $st->execute($lote);
+            foreach ($st->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+                $out[(int) $id] = true;
+            }
+        }
+        return $out;
+    }
+
+    private function claveTienda(array $a): string
+    {
+        $tienda = mb_strtoupper(trim($a['tienda_stock_nombre'] ?? ''));
+        return $tienda !== '' ? $tienda : mb_strtoupper(trim($a['plaza_nombre'] ?? 'SIN TIENDA'));
     }
 
     private function claveUbicacion(array $a): string
@@ -141,7 +201,8 @@ class ExportController
         return $partes[0] . (isset($partes[1]) ? ' ' . $partes[1] : '');
     }
 
-    private function llenarHoja($sheet, array $activos, string $nombre, bool $esDeUsuario): void
+    /** @param string $modo  'bodega' | 'usuario' | 'tienda' — cambia qué va en la columna Ubicación. */
+    private function llenarHoja($sheet, array $activos, string $nombre, string $modo = 'bodega'): void
     {
         if (empty($activos)) return;
 
@@ -171,11 +232,11 @@ class ExportController
             $sheet->setCellValue("D{$fila}", $a['serie'] ?? '');
             $sheet->setCellValue("E{$fila}", $a['codigo_barras'] ?? '');
             $sheet->setCellValue("F{$fila}", $statusKey);
-            if ($esDeUsuario) {
-                $sheet->setCellValue("G{$fila}", trim(($a['negocio_nombre'] ?? '') . ' ' . ($a['plaza_nombre'] ?? '')));
-            } else {
-                $sheet->setCellValue("G{$fila}", $a['bodega_nombre'] ?? 'BODEGA');
-            }
+            $sheet->setCellValue("G{$fila}", match ($modo) {
+                'usuario' => trim(($a['negocio_nombre'] ?? '') . ' ' . ($a['plaza_nombre'] ?? '')),
+                'tienda'  => $a['tienda_stock_nombre'] ?? ($a['plaza_nombre'] ?? 'TIENDA'),
+                default   => $a['bodega_nombre'] ?? 'BODEGA',
+            });
             $sheet->setCellValue("H{$fila}", $a['procedencia_nombre'] ?? '');
 
             $porColor[$statusKey][] = $fila;
