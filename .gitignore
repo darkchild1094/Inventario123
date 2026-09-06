@@ -5,6 +5,7 @@
 /.vscode/
 .DS_Store
 /storage/sessions/
+/storage/*.json
 /public/uploads/firmas/
 
 # Volcados de datos reales (inventario, empleados, hashes de password):

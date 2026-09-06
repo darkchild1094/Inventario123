@@ -13,7 +13,12 @@ use App\Models\Usuario;
 class AuthController
 {
     private $db;
-    private const SESSION_TIMEOUT = 1800; // 30 minutos
+
+    /** Inactividad máxima de una sesión web SIN "Recordarme" (12 h). */
+    private const SESSION_TIMEOUT = 43200;
+
+    /** Vida de la cookie cuando el usuario marca "Recordarme" (30 días). */
+    private const REMEMBER_LIFETIME = 2592000;
 
     public function __construct($db)
     {
@@ -75,6 +80,18 @@ class AuthController
 
         session_regenerate_id(true);
 
+        // "Recordarme": sesión sin timeout de inactividad + cookie de larga vida.
+        $recordar = !empty($_POST['remember']);
+        $_SESSION['recordar'] = $recordar;
+        if ($recordar) {
+            setcookie(session_name(), session_id(), [
+                'expires'  => time() + self::REMEMBER_LIFETIME,
+                'path'     => '/',
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
+        }
+
         $tipo = strtolower(trim($usuario['tipo'] ?? 'fs'));
 
         $_SESSION['usuario'] = [
@@ -103,13 +120,28 @@ class AuthController
         exit;
     }
 
-    public function logout(): void
+    /** Borra la sesión y su cookie, sin redirigir. */
+    private function limpiarSesion(): void
     {
         $_SESSION = [];
-        if (isset($_COOKIE[session_name()])) {
-            setcookie(session_name(), '', time() - 3600, '/');
+        if (ini_get('session.use_cookies') && isset($_COOKIE[session_name()])) {
+            setcookie(session_name(), '', [
+                'expires'  => time() - 3600,
+                'path'     => '/',
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
         }
-        session_destroy();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_destroy();
+        }
+    }
+
+    public function logout(): void
+    {
+        $this->limpiarSesion();
+        // Evita que el navegador sirva una página autenticada cacheada tras salir.
+        header('Cache-Control: no-store, no-cache, must-revalidate');
         header('Location: index.php?controller=auth&action=mostrarLogin');
         exit;
     }
@@ -122,15 +154,14 @@ class AuthController
             return false;
         }
 
-        // La app móvil (manda X-Session-Id) tiene sesión perpetua: no expira por
-        // inactividad. La web sí conserva su timeout de 30 min.
-        $esApp = isset($_SERVER['HTTP_X_SESSION_ID']);
+        // Sin timeout de inactividad para: la app móvil (manda X-Session-Id) y
+        // las sesiones web con "Recordarme". El resto expira a las 12 h.
+        $sinTimeout = isset($_SERVER['HTTP_X_SESSION_ID']) || !empty($_SESSION['recordar']);
 
-        if (!$esApp && isset($_SESSION['last_activity'])) {
-            if (time() - $_SESSION['last_activity'] > self::SESSION_TIMEOUT) {
-                $this->logout();
-                return false;
-            }
+        if (!$sinTimeout && isset($_SESSION['last_activity'])
+            && time() - $_SESSION['last_activity'] > self::SESSION_TIMEOUT) {
+            $this->limpiarSesion();
+            return false;
         }
         $_SESSION['last_activity'] = time();
 

@@ -918,6 +918,7 @@ class ApiController
             $_SESSION['usuario_nombre'] = $usuario['nombre'];
             $_SESSION['usuario_tipo']   = $tipo;
             $_SESSION['last_activity']  = time();
+            $_SESSION['recordar']       = true; // la app siempre es sesión perpetua
 
             unset($usuario['password']);
             $this->json([

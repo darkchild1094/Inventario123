@@ -1,13 +1,12 @@
 <?php
 session_name('INV123_SESSID');
 
-// ── Sesión de larga vida ─────────────────────────────────────────────────────
-// La app móvil manda X-Session-Id y espera una sesión "perpetua": subimos la
-// vida de la sesión de PHP a 1 año y usamos un save_path propio del proyecto
-// para que el recolector de basura de PHP (o el de otros vhosts en hosting
-// compartido) no barra los archivos de sesión. La expiración por inactividad
-// de la web (30 min) sigue viva en AuthController::estaAutenticado(), que la
-// omite cuando la petición trae X-Session-Id.
+// ── Almacenamiento de sesión ─────────────────────────────────────────────────
+// save_path propio para que el recolector de basura de PHP (o el de otros
+// vhosts en hosting compartido) no barra los archivos de sesión. Los archivos
+// viven hasta 1 año; la vigencia real de cada sesión la decide AuthController
+// (perpetua para la app y para "Recordarme"; timeout de inactividad para el
+// resto de la web).
 $__anio = 60 * 60 * 24 * 365;
 $__sessDir = dirname(__DIR__) . '/storage/sessions';
 if (!is_dir($__sessDir)) {
@@ -19,8 +18,11 @@ if (is_dir($__sessDir) && is_writable($__sessDir)) {
 ini_set('session.gc_maxlifetime', (string) $__anio);
 ini_set('session.gc_probability', '1');
 ini_set('session.gc_divisor', '1000');
+
+// Cookie de sesión por defecto (muere al cerrar el navegador). Si el usuario
+// marca "Recordarme", AuthController::login() la reemite con vida larga.
 session_set_cookie_params([
-    'lifetime' => $__anio,
+    'lifetime' => 0,
     'path'     => '/',
     'httponly' => true,
     'samesite' => 'Lax',
