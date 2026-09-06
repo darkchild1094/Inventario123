@@ -89,15 +89,26 @@ try {
 // ── Servir uploads ────────────────────────────────────────────────────────────
 
 $requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$requestUri = rawurldecode((string) $requestUri);
 
-if (strpos($requestUri, '/uploads/') !== false) {
-    $filePath = ROOT_PATH . '/public' . $requestUri;
-    if (file_exists($filePath)) {
-        $ext  = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-        $mime = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
-        header('Content-Type: '   . ($mime[$ext] ?? 'image/jpeg'));
+// Fallback para servir imágenes de uploads/ cuando el RewriteRule de .htaccess
+// no aplica (hosting tipo alias). Sólo se sirven imágenes y sólo archivos que,
+// ya resueltos (realpath), quedan DENTRO de public/uploads/ — así un
+// "/uploads/../../.env" no escapa de la carpeta.
+if (preg_match('#/uploads/#', $requestUri)) {
+    $uploadsDir = realpath(ROOT_PATH . '/public/uploads');
+    $rel        = substr($requestUri, strpos($requestUri, '/uploads/') + strlen('/uploads/'));
+    $filePath   = realpath(ROOT_PATH . '/public/uploads/' . $rel);
+    $ext        = strtolower(pathinfo($filePath ?: '', PATHINFO_EXTENSION));
+    $mime       = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+
+    if ($filePath !== false && $uploadsDir !== false
+        && str_starts_with($filePath, $uploadsDir . DIRECTORY_SEPARATOR)
+        && is_file($filePath) && isset($mime[$ext])) {
+        header('Content-Type: '   . $mime[$ext]);
         header('Content-Length: ' . filesize($filePath));
         header('Cache-Control: public, max-age=86400');
+        header('X-Content-Type-Options: nosniff');
         readfile($filePath);
         exit;
     }

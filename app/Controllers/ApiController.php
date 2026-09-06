@@ -745,6 +745,13 @@ class ApiController
 
         if ($origen === 'tienda') {
             $tiendaId = (int) ($_POST['origen_tienda_id'] ?? 0);
+            $tienda   = $tiendaId > 0 ? (new Tienda($this->db))->obtenerPorId($tiendaId) : null;
+            if (!$tienda) {
+                $this->json(['success' => false, 'message' => 'Tienda de origen inválida.'], 400);
+            }
+            if (!Permisos::esAdmin() && !in_array((int) $tienda['plaza_id'], Permisos::misPlazas(), true)) {
+                $this->json(['success' => false, 'message' => 'La tienda de origen no pertenece a tu plaza.'], 403);
+            }
             $validos = array_map('intval', array_column(
                 (new Activo($this->db))->obtenerTodosFiltrado(['tienda_id' => $tiendaId, 'status' => 'en_uso'], 1, 2000)['activos'] ?? [], 'id'));
             $datos['origen_tienda_id'] = $tiendaId;
