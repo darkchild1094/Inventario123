@@ -4,6 +4,8 @@
  * las respuestas AJAX de filtrado en vivo de la pestaña Historial.
  * Variables: $movimientos, $paginacion, $eventos
  */
+use App\Helpers\HistorialVista as HV;
+
 $colorEvt = [
     'alta' => 'success', 'cambio_status' => 'primary', 'cambio_stock' => 'info',
     'reemplazo_entra' => 'success', 'reemplazo_sale' => 'warning text-dark',
@@ -39,11 +41,13 @@ $colorEvt = [
                     </span>
                 </td>
                 <td>
-                    <?php $serie = $m['activo_serie'] ?? ($m['datos_json'] ? (json_decode($m['datos_json'], true)['serie'] ?? null) : null); ?>
-                    <div class="fw-bold"><?= htmlspecialchars($serie ?? '—') ?></div>
-                    <div class="text-muted"><?= htmlspecialchars(trim(($m['dispositivo_nombre'] ?? '') . ' ' . ($m['modelo_nombre'] ?? ''))) ?></div>
-                    <?php if (!empty($m['relacionado_serie'])): ?>
-                        <div class="text-muted"><i class="fas fa-link me-1"></i><?= htmlspecialchars($m['relacionado_serie']) ?></div>
+                    <div class="fw-bold"><?= htmlspecialchars(HV::titulo($m)) ?></div>
+                    <div class="text-muted font-monospace" style="font-size:.8em"><?= htmlspecialchars(HV::identificadores($m)) ?></div>
+                    <?php if (HV::tieneRelacionado($m)): ?>
+                        <div class="mt-1 ps-2 border-start border-2">
+                            <div class="text-muted"><i class="fas fa-link me-1"></i><?= htmlspecialchars(HV::relLabel($m['evento'])) ?>: <strong><?= htmlspecialchars(HV::titulo($m, 'rel_')) ?></strong></div>
+                            <div class="text-muted font-monospace" style="font-size:.8em"><?= htmlspecialchars(HV::identificadores($m, 'rel_')) ?></div>
+                        </div>
                     <?php endif; ?>
                 </td>
                 <td class="text-nowrap">

@@ -44,16 +44,21 @@ class MovimientoService
         return mb_substr($combinada, 0, 255);
     }
 
-    /** Snapshot mínimo de un activo para datos_json. */
+    /**
+     * Snapshot de un activo para datos_json: se congela con el movimiento para
+     * que el historial siga siendo legible aunque el activo cambie o se borre.
+     * Incluye dispositivo, marca, modelo, serie, código de barras y N° de activo.
+     */
     public static function snapshot(array $a): array
     {
         return [
-            'serie'       => $a['serie'] ?? null,
+            'dispositivo'   => $a['dispositivo_nombre'] ?? null,
+            'marca'         => $a['marca_nombre'] ?? null,
+            'modelo'        => $a['modelo_nombre'] ?? null,
+            'serie'         => $a['serie'] ?? null,
             'codigo_barras' => $a['codigo_barras'] ?? null,
             'num_activo'    => $a['num_activo'] ?? null,
-            'modelo'      => $a['modelo_nombre'] ?? null,
-            'dispositivo' => $a['dispositivo_nombre'] ?? null,
-            'status'      => $a['status'] ?? null,
+            'status'        => $a['status'] ?? null,
         ];
     }
 
@@ -150,7 +155,7 @@ class MovimientoService
             'grupo_id'              => $grupo,
             'usuario_id'            => $actorId ?: null,
             'nota'                  => self::nota($motivo, 'Sustituye a la serie ' . ($sale['serie'] ?? '—') . '.'),
-            'datos_json'            => self::snapshot($entra),
+            'datos_json'            => self::snapshot($entra) + ['relacionado' => self::snapshot($sale)],
         ]);
 
         // ── Lado SALE: resolver stock destino y mover ────────────────
@@ -199,7 +204,7 @@ class MovimientoService
             'grupo_id'              => $grupo,
             'usuario_id'            => $actorId ?: null,
             'nota'                  => self::nota($motivo, trim('Reemplazado por la serie ' . ($entra['serie'] ?? '—') . '. ' . ($res['nota'] ?? ''))),
-            'datos_json'            => self::snapshot($saleDespues ?: $sale),
+            'datos_json'            => self::snapshot($saleDespues ?: $sale) + ['relacionado' => self::snapshot($entra)],
         ]);
     }
 }

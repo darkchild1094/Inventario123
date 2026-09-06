@@ -4,6 +4,7 @@
  * que se abre al hacer clic en una tarjeta (sin recargar la página).
  * Variable esperada: $activo (resultado de Activo::obtenerPorId()).
  */
+use App\Helpers\HistorialVista as HV;
 
 $statusClase = match($activo['status'] ?? '') {
     'en_bodega' => 'secondary',
@@ -42,11 +43,15 @@ $statusLabel = match($activo['status'] ?? '') {
         <strong><?= htmlspecialchars($activo['num_activo'] ?? '—') ?></strong>
     </div>
 
-    <div class="col-6">
+    <div class="col-4">
         <small class="text-muted d-block">Dispositivo</small>
         <strong><?= htmlspecialchars($activo['dispositivo_nombre'] ?? '—') ?></strong>
     </div>
-    <div class="col-6">
+    <div class="col-4">
+        <small class="text-muted d-block">Marca</small>
+        <strong><?= htmlspecialchars($activo['marca_nombre'] ?? '—') ?></strong>
+    </div>
+    <div class="col-4">
         <small class="text-muted d-block">Modelo</small>
         <strong><?= htmlspecialchars($activo['modelo_nombre'] ?? '—') ?></strong>
     </div>
@@ -157,6 +162,8 @@ $hayFotos = array_filter($fotosActivo, fn($_, $c) => !empty($activo[$c]), ARRAY_
                     <span class="text-muted"><?= htmlspecialchars($m['creado_en'] ?? '') ?></span>
                 </div>
                 <div class="mt-1">
+                    <div><?= htmlspecialchars(HV::titulo($m)) ?></div>
+                    <div class="text-muted font-monospace" style="font-size:.85em"><?= htmlspecialchars(HV::identificadores($m)) ?></div>
                     <?php if (!empty($m['status_anterior']) || !empty($m['status_nuevo'])): ?>
                         <div>Estatus:
                             <strong><?= htmlspecialchars($m['status_anterior'] ?? '—') ?></strong>
@@ -169,8 +176,11 @@ $hayFotos = array_filter($fotosActivo, fn($_, $c) => !empty($activo[$c]), ARRAY_
                             &rarr; <strong><?= htmlspecialchars($m['stock_new_nombre']) ?></strong>
                         </div>
                     <?php endif; ?>
-                    <?php if (!empty($m['relacionado_serie'])): ?>
-                        <div>Relacionado con serie <strong><?= htmlspecialchars($m['relacionado_serie']) ?></strong></div>
+                    <?php if (HV::tieneRelacionado($m)): ?>
+                        <div class="ps-2 border-start border-2 mt-1">
+                            <div><i class="fas fa-link me-1"></i><?= htmlspecialchars(HV::relLabel($m['evento'])) ?>: <strong><?= htmlspecialchars(HV::titulo($m, 'rel_')) ?></strong></div>
+                            <div class="text-muted font-monospace" style="font-size:.85em"><?= htmlspecialchars(HV::identificadores($m, 'rel_')) ?></div>
+                        </div>
                     <?php endif; ?>
                     <?php if (!empty($m['tienda_nombre'])): ?>
                         <div>Tienda: <strong><?= htmlspecialchars($m['tienda_nombre']) ?></strong></div>

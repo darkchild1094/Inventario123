@@ -96,10 +96,16 @@ class Movimiento
                a.codigo_barras      AS activo_codigo_barras,
                a.num_activo         AS activo_num_activo,
                mo.nombre            AS modelo_nombre,
+               ma.nombre            AS marca_nombre,
                d.nombre             AS dispositivo_nombre,
                t.nombre             AS tienda_nombre,
                uact.nombre          AS actor_nombre,
                arel.serie           AS relacionado_serie,
+               arel.codigo_barras   AS relacionado_codigo_barras,
+               arel.num_activo      AS relacionado_num_activo,
+               morel.nombre         AS relacionado_modelo,
+               marel.nombre         AS relacionado_marca,
+               drel.nombre          AS relacionado_dispositivo,
                so.tipo              AS stock_ant_tipo,
                COALESCE(uso.nombre, bo.nombre, tso.nombre) AS stock_ant_nombre,
                sn.tipo              AS stock_new_tipo,
@@ -107,10 +113,14 @@ class Movimiento
         FROM {$this->table} m
         LEFT JOIN activo      a    ON a.id  = m.activo_id
         LEFT JOIN modelo      mo   ON mo.id = a.modelo_id
+        LEFT JOIN marca       ma   ON ma.id = mo.marca_id
         LEFT JOIN dispositivo d    ON d.id  = mo.dispositivo_id
         LEFT JOIN tienda      t    ON t.id  = m.tienda_id
         LEFT JOIN usuario     uact ON uact.id = m.usuario_id
-        LEFT JOIN activo      arel ON arel.id = m.activo_relacionado_id
+        LEFT JOIN activo      arel  ON arel.id  = m.activo_relacionado_id
+        LEFT JOIN modelo      morel ON morel.id = arel.modelo_id
+        LEFT JOIN marca       marel ON marel.id = morel.marca_id
+        LEFT JOIN dispositivo drel  ON drel.id  = morel.dispositivo_id
         LEFT JOIN stock       so   ON so.id = m.stock_anterior_id
         LEFT JOIN usuario     uso  ON uso.id = so.usuario_id
         LEFT JOIN bodega      bo   ON bo.id  = so.bodega_id
@@ -129,7 +139,55 @@ class Movimiento
         $stmt = $this->conn->prepare($sql);
         $stmt->bindValue(':id', $activoId, PDO::PARAM_INT);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $this->enriquecer($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Añade a cada movimiento los campos ya resueltos del equipo y del equipo
+     * relacionado (reemplazo), preferindo el snapshot congelado en datos_json y
+     * cayendo a las columnas vivas del JOIN cuando el snapshot es viejo/parcial.
+     *
+     *   eq_dispositivo, eq_marca, eq_modelo, eq_serie, eq_codigo_barras, eq_num_activo, eq_status
+     *   rel_dispositivo, rel_marca, rel_modelo, rel_serie, rel_codigo_barras, rel_num_activo  (o null)
+     *   datos           snapshot decodificado (array) para quien lo quiera crudo
+     */
+    private function enriquecer(array $rows): array
+    {
+        foreach ($rows as &$m) {
+            $s = [];
+            if (!empty($m['datos_json'])) {
+                $dec = json_decode($m['datos_json'], true);
+                if (is_array($dec)) $s = $dec;
+            }
+            $m['datos'] = $s;
+
+            $m['eq_dispositivo']   = $s['dispositivo']   ?? $m['dispositivo_nombre']      ?? null;
+            $m['eq_marca']         = $s['marca']         ?? $m['marca_nombre']            ?? null;
+            $m['eq_modelo']        = $s['modelo']        ?? $m['modelo_nombre']           ?? null;
+            $m['eq_serie']         = $s['serie']         ?? $m['activo_serie']            ?? null;
+            $m['eq_codigo_barras'] = $s['codigo_barras'] ?? $m['activo_codigo_barras']   ?? null;
+            $m['eq_num_activo']    = $s['num_activo']    ?? $m['activo_num_activo']       ?? null;
+            $m['eq_status']        = $s['status']        ?? $m['status_nuevo']            ?? null;
+
+            $r = (isset($s['relacionado']) && is_array($s['relacionado'])) ? $s['relacionado'] : null;
+            $tieneRel = $r !== null
+                || !empty($m['relacionado_serie']) || !empty($m['relacionado_codigo_barras'])
+                || !empty($m['relacionado_num_activo']) || !empty($m['activo_relacionado_id']);
+
+            if ($tieneRel) {
+                $m['rel_dispositivo']   = $r['dispositivo']   ?? $m['relacionado_dispositivo']    ?? null;
+                $m['rel_marca']         = $r['marca']         ?? $m['relacionado_marca']          ?? null;
+                $m['rel_modelo']        = $r['modelo']        ?? $m['relacionado_modelo']         ?? null;
+                $m['rel_serie']         = $r['serie']         ?? $m['relacionado_serie']          ?? null;
+                $m['rel_codigo_barras'] = $r['codigo_barras'] ?? $m['relacionado_codigo_barras']  ?? null;
+                $m['rel_num_activo']    = $r['num_activo']    ?? $m['relacionado_num_activo']     ?? null;
+            } else {
+                $m['rel_dispositivo'] = $m['rel_marca'] = $m['rel_modelo'] = null;
+                $m['rel_serie'] = $m['rel_codigo_barras'] = $m['rel_num_activo'] = null;
+            }
+        }
+        unset($m);
+        return $rows;
     }
 
     /**
@@ -147,8 +205,17 @@ class Movimiento
             $params[':activo_id'] = (int) $filtros['activo_id'];
         }
         if (!empty($filtros['serie'])) {
-            $where .= ' AND (a.serie LIKE :serie OR a.codigo_barras LIKE :serie OR a.num_activo LIKE :serie)';
-            $params[':serie'] = '%' . $filtros['serie'] . '%';
+            // Un placeholder por columna: con prepares nativos (EMULATE_PREPARES=false)
+            // no se puede reutilizar el mismo :nombre varias veces.
+            $like = '%' . $filtros['serie'] . '%';
+            $where .= ' AND (a.serie LIKE :serie_a OR a.codigo_barras LIKE :serie_b OR a.num_activo LIKE :serie_c'
+                    . ' OR arel.serie LIKE :serie_d OR arel.codigo_barras LIKE :serie_e OR arel.num_activo LIKE :serie_f)';
+            $params[':serie_a'] = $like;
+            $params[':serie_b'] = $like;
+            $params[':serie_c'] = $like;
+            $params[':serie_d'] = $like;
+            $params[':serie_e'] = $like;
+            $params[':serie_f'] = $like;
         }
         if (!empty($filtros['evento']) && isset(self::EVENTOS[$filtros['evento']])) {
             $where .= ' AND m.evento = :evento';
@@ -195,6 +262,7 @@ class Movimiento
 
         $stmtC = $this->conn->prepare(
             "SELECT COUNT(*) FROM {$this->table} m LEFT JOIN activo a ON a.id = m.activo_id"
+            . " LEFT JOIN activo arel ON arel.id = m.activo_relacionado_id"
             . " LEFT JOIN stock so ON so.id = m.stock_anterior_id"
             . " LEFT JOIN stock sn ON sn.id = m.stock_nuevo_id" . $where
         );
@@ -216,7 +284,7 @@ class Movimiento
         $stmt->execute();
 
         return [
-            'movimientos' => $stmt->fetchAll(PDO::FETCH_ASSOC),
+            'movimientos' => $this->enriquecer($stmt->fetchAll(PDO::FETCH_ASSOC)),
             'paginacion'  => [
                 'pagina_actual'    => $pagina,
                 'total_paginas'    => $totalPaginas,

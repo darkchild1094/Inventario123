@@ -51,6 +51,7 @@ class Activo
 
         $sqlBase = "FROM {$this->table} a
                     LEFT JOIN modelo      mo  ON a.modelo_id             = mo.id
+                    LEFT JOIN marca       ma  ON mo.marca_id             = ma.id
                     LEFT JOIN dispositivo d   ON mo.dispositivo_id       = d.id
                     LEFT JOIN area_modelo am  ON am.modelo_id            = mo.id
                     LEFT JOIN area        ar  ON am.area_id              = ar.id
@@ -151,6 +152,7 @@ class Activo
                     a.procedencia_tienda_id, a.tienda_uso_id, a.stock_id,
                     a.fecha_alta, a.fecha_modificacion,
                     mo.nombre  AS modelo_nombre,
+                    ma.nombre  AS marca_nombre,
                     d.id       AS dispositivo_id,
                     d.nombre   AS dispositivo_nombre,
                     ar.nombre  AS area_nombre,
@@ -198,6 +200,7 @@ class Activo
         $sql = "SELECT
                     a.*,
                     mo.nombre  AS modelo_nombre,
+                    ma.nombre  AS marca_nombre,
                     d.id       AS dispositivo_id,
                     d.nombre   AS dispositivo_nombre,
                     ar.nombre  AS area_nombre,
@@ -216,6 +219,7 @@ class Activo
                     tp.nombre  AS procedencia_nombre
                 FROM {$this->table} a
                 LEFT JOIN modelo      mo  ON a.modelo_id             = mo.id
+                LEFT JOIN marca       ma  ON mo.marca_id             = ma.id
                 LEFT JOIN dispositivo d   ON mo.dispositivo_id       = d.id
                 LEFT JOIN area_modelo am  ON am.modelo_id            = mo.id
                 LEFT JOIN area        ar  ON am.area_id              = ar.id
