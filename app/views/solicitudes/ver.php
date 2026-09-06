@@ -32,17 +32,23 @@ $badge = match ($sol['estado']) {
             <span class="badge bg-<?= $badge ?> text-uppercase fs-6"><?= $estados[$sol['estado']] ?? $sol['estado'] ?></span>
         </div>
 
+        <?php
+        $destTxt = $destinos[$sol['destino']] ?? $sol['destino'];
+        $origen  = $sol['origen_nombre'] ?: ($sol['origen_tienda_nombre'] ? 'Tienda ' . $sol['origen_tienda_nombre'] : '—');
+        ?>
         <dl class="row mb-3">
-            <dt class="col-sm-3">Ingeniero</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['origen_nombre'] ?? '—') ?></dd>
+            <dt class="col-sm-3">Movimiento</dt><dd class="col-sm-9"><strong><?= htmlspecialchars($destTxt) ?></strong></dd>
+            <dt class="col-sm-3">Origen</dt><dd class="col-sm-9"><?= htmlspecialchars($origen) ?></dd>
+            <?php if ($sol['destino'] === 'en_bodega'): ?>
+                <dt class="col-sm-3">Bodega destino</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['bodega_nombre'] ?? '—') ?></dd>
+            <?php elseif ($sol['destino'] === 'asignado'): ?>
+                <dt class="col-sm-3">Recibe</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['destino_usuario_nombre'] ?? '—') ?></dd>
+            <?php endif; ?>
             <dt class="col-sm-3">Plaza</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['plaza_nombre'] ?? '—') ?></dd>
-            <dt class="col-sm-3">Bodega destino</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['bodega_nombre'] ?? '—') ?></dd>
+            <dt class="col-sm-3">Solicitante</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['solicitante_nombre'] ?? '—') ?></dd>
             <dt class="col-sm-3">Creada</dt><dd class="col-sm-9"><?= htmlspecialchars(substr((string) $sol['creado_en'], 0, 16)) ?></dd>
             <?php if (!empty($sol['nota'])): ?>
                 <dt class="col-sm-3">Motivo</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['nota']) ?></dd>
-            <?php endif; ?>
-            <?php if (!empty($sol['aprobador_nombre'])): ?>
-                <dt class="col-sm-3">Resuelta por</dt><dd class="col-sm-9"><?= htmlspecialchars($sol['aprobador_nombre']) ?>
-                    <?= !empty($sol['resuelto_en']) ? '· ' . htmlspecialchars(substr((string) $sol['resuelto_en'], 0, 16)) : '' ?></dd>
             <?php endif; ?>
             <?php if ($sol['estado'] === 'rechazada' && !empty($sol['motivo_rechazo'])): ?>
                 <dt class="col-sm-3 text-danger">Motivo del rechazo</dt>
@@ -68,19 +74,34 @@ $badge = match ($sol['estado']) {
             </table>
         </div>
 
+        <?php
+        $dobleFirma = $sol['destino'] === 'garantia';
+        $lbl1 = $dobleFirma ? 'Firma del ATI' : 'Firma del aprobador';
+        ?>
         <div class="row g-3 mb-3">
-            <div class="col-sm-6">
-                <div class="text-muted small mb-1">Firma del ingeniero</div>
+            <div class="col-sm-<?= $dobleFirma ? 4 : 6 ?>">
+                <div class="text-muted small mb-1">Firma del solicitante</div>
                 <?php if (!empty($sol['firma_solicitante'])): ?>
-                    <img class="firma-img" src="uploads/firmas/<?= htmlspecialchars($sol['firma_solicitante']) ?>" alt="Firma solicitante">
+                    <img class="firma-img" src="uploads/firmas/<?= htmlspecialchars($sol['firma_solicitante']) ?>" alt="Firma">
+                    <div class="small text-muted"><?= htmlspecialchars($sol['solicitante_nombre'] ?? '') ?></div>
                 <?php else: ?><span class="text-muted">—</span><?php endif; ?>
             </div>
-            <div class="col-sm-6">
-                <div class="text-muted small mb-1">Firma del coordinador</div>
+            <div class="col-sm-<?= $dobleFirma ? 4 : 6 ?>">
+                <div class="text-muted small mb-1"><?= $lbl1 ?></div>
                 <?php if (!empty($sol['firma_aprobador'])): ?>
-                    <img class="firma-img" src="uploads/firmas/<?= htmlspecialchars($sol['firma_aprobador']) ?>" alt="Firma aprobador">
+                    <img class="firma-img" src="uploads/firmas/<?= htmlspecialchars($sol['firma_aprobador']) ?>" alt="Firma">
+                    <div class="small text-muted"><?= htmlspecialchars($sol['aprobador_nombre'] ?? '') ?></div>
                 <?php else: ?><span class="text-muted">Pendiente</span><?php endif; ?>
             </div>
+            <?php if ($dobleFirma): ?>
+            <div class="col-sm-4">
+                <div class="text-muted small mb-1">Firma del coordinador</div>
+                <?php if (!empty($sol['firma_aprobador2'])): ?>
+                    <img class="firma-img" src="uploads/firmas/<?= htmlspecialchars($sol['firma_aprobador2']) ?>" alt="Firma">
+                    <div class="small text-muted"><?= htmlspecialchars($sol['aprobador2_nombre'] ?? '') ?></div>
+                <?php else: ?><span class="text-muted">Pendiente</span><?php endif; ?>
+            </div>
+            <?php endif; ?>
         </div>
 
         <?php if (!empty($movimientos)): ?>
@@ -94,9 +115,9 @@ $badge = match ($sol['estado']) {
             </ul>
         <?php endif; ?>
 
-        <?php if (!empty($puedeResolver)): ?>
+        <?php if (!empty($puedeFirmar)): ?>
             <hr>
-            <h6 class="fw-semibold">Aprobar (requiere tu firma)</h6>
+            <h6 class="fw-semibold">Firmar (requiere tu firma)</h6>
             <form method="POST" action="index.php?controller=solicitud&action=aprobar" id="formAprobar">
                 <input type="hidden" name="id" value="<?= (int) $sol['id'] ?>">
                 <canvas id="firmaPad"></canvas>
@@ -106,7 +127,7 @@ $badge = match ($sol['estado']) {
                     </button>
                 </div>
                 <input type="hidden" name="firma" id="firmaInput">
-                <button class="btn btn-success" id="btnAprobar"><i class="fas fa-check me-1"></i>Firmar y aprobar</button>
+                <button class="btn btn-success" id="btnAprobar"><i class="fas fa-check me-1"></i>Firmar</button>
             </form>
 
             <form method="POST" action="index.php?controller=solicitud&action=rechazar" class="mt-3"
@@ -134,7 +155,7 @@ $badge = match ($sol['estado']) {
     </div>
 </div>
 
-<?php if (!empty($puedeResolver)): ?>
+<?php if (!empty($puedeFirmar)): ?>
 <script>
 (function () {
     var canvas = document.getElementById('firmaPad');

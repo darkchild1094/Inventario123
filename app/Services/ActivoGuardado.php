@@ -128,13 +128,33 @@ class ActivoGuardado
         $status  = Activo::normalizarStatus($datos['status'] ?? 'en_bodega');
         $tipo    = $actor['tipo'] ?? '';
 
-        // Activo con una solicitud de traslado 'pendiente' → bloqueado hasta
-        // que el coordinador la resuelva (aprobar/rechazar) o el ingeniero la cancele.
         if ($antes !== null && !empty($antes['id'])) {
+            // 1) Activo con una solicitud de movimiento 'pendiente' → bloqueado
+            //    hasta que se resuelva (aprobar / rechazar / cancelar).
             $enPendiente = (new \App\Models\SolicitudTraslado($this->db))
                 ->activosEnSolicitudPendiente([(int) $antes['id']]);
             if ($enPendiente) {
-                return $this->err('Este activo tiene una solicitud de traslado pendiente de aprobación; no se puede modificar hasta resolverla.');
+                return $this->err('Este activo tiene una solicitud de movimiento pendiente; no se puede modificar hasta resolverla.');
+            }
+
+            // 2) Todo cambio de dueño/estatus de un activo que hoy está en manos
+            //    de un ingeniero (asignado) o de una tienda (en_uso) requiere una
+            //    Solicitud de movimiento firmada — para TODOS los roles, incluido
+            //    admin. Excepciones: instalar/mover a tienda ('en_uso'),
+            //    reasignar al MISMO ingeniero, y quedarse igual.
+            $stAntes = $antes['status'] ?? '';
+            if (in_array($stAntes, ['asignado', 'en_uso'], true) && $status !== $stAntes && $status !== 'en_uso') {
+                $mismoDueno = $status === 'asignado' && $stAntes === 'asignado'
+                    && (int) ($post['asignado_usuario_id'] ?? 0) === (int) ($antes['usuario_stock_id'] ?? 0);
+                if (!$mismoDueno && in_array($status, ['asignado', 'en_bodega', 'baja', 'garantia'], true)) {
+                    $lbl = [
+                        'en_bodega' => 'devolver equipo a bodega',
+                        'asignado'  => 'traspasar equipo a otro ingeniero',
+                        'baja'      => 'dar de baja',
+                        'garantia'  => 'enviar a garantía',
+                    ][$status];
+                    return $this->err("Para {$lbl} usa una Solicitud de movimiento (requiere firma y autorización). No se puede cambiar el estatus directo aquí.");
+                }
             }
         }
         $actorId = (int) ($actor['id'] ?? 0);
@@ -186,11 +206,6 @@ class ActivoGuardado
             }
             $ctx['asignado_usuario_id'] = $destino;
         } elseif ($status === 'en_bodega') {
-            // Un ingeniero (fs) NO puede mandar su stock 'asignado' a bodega
-            // directo: debe pasar por una Solicitud de traslado (doble firma).
-            if ($tipo === 'fs' && ($antes['status'] ?? null) === 'asignado') {
-                return $this->err('Para mandar equipo a bodega usa una Solicitud de traslado (requiere la firma del coordinador).');
-            }
             $destino = trim((string) ($post['stock_destino'] ?? ''));
             if ($destino !== '' && str_starts_with($destino, 'bodega_') && in_array($tipo, ['admin', 'coordinador'], true)) {
                 $ctx['bodega_id'] = (int) explode('_', $destino, 2)[1];

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Traslados a bodega - Inventario 123</title>
+    <title>Traslados - Inventario 123</title>
     <?php include ROOT_PATH . '/app/views/components/favicon.php'; ?>
     <style> body { background:#f4f7f6; } </style>
 </head>
@@ -12,16 +12,14 @@
 <div class="container py-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
         <h4 class="fw-bold mb-0">
-            <i class="fas fa-right-left me-2"></i>Solicitudes de traslado a bodega
+            <i class="fas fa-right-left me-2"></i>Solicitudes de movimiento
             <?php if (!empty($pendientes)): ?>
-                <span class="badge rounded-pill bg-warning text-dark ms-1"><?= (int) $pendientes ?> pendientes</span>
+                <span class="badge rounded-pill bg-warning text-dark ms-1"><?= (int) $pendientes ?> por firmar</span>
             <?php endif; ?>
         </h4>
-        <?php if (\App\Helpers\Permisos::puedeCrearSolicitudTraslado()): ?>
-            <a href="index.php?controller=solicitud&action=crear" class="btn btn-primary">
-                <i class="fas fa-plus me-1"></i>Nueva solicitud
-            </a>
-        <?php endif; ?>
+        <a href="index.php?controller=solicitud&action=crear" class="btn btn-primary">
+            <i class="fas fa-plus me-1"></i>Nueva solicitud
+        </a>
     </div>
 
     <form method="GET" class="mb-3">
@@ -43,14 +41,8 @@
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>#</th>
-                        <th>Fecha</th>
-                        <th>Ingeniero</th>
-                        <th>Plaza</th>
-                        <th>Destino</th>
-                        <th class="text-center">Activos</th>
-                        <th>Estado</th>
-                        <th></th>
+                        <th>#</th><th>Fecha</th><th>Movimiento</th><th>Origen</th><th>Plaza</th>
+                        <th class="text-center">Activos</th><th>Estado</th><th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -58,25 +50,27 @@
                     <tr><td colspan="8" class="text-center text-muted py-4">Sin solicitudes.</td></tr>
                 <?php else: foreach ($solicitudes as $s):
                     $badge = match ($s['estado']) {
-                        'pendiente' => 'warning text-dark',
-                        'aprobada'  => 'success',
-                        'rechazada' => 'danger',
-                        'cancelada' => 'secondary',
-                        default     => 'light text-dark',
+                        'pendiente' => 'warning text-dark', 'aprobada' => 'success',
+                        'rechazada' => 'danger', 'cancelada' => 'secondary', default => 'light text-dark',
                     };
+                    $porFirmar = in_array($s['id'], $porFirmarIds ?? [], true);
+                    $origen = $s['origen_nombre'] ?: ($s['origen_tienda_nombre'] ?: '—');
+                    $destTxt = \App\Models\SolicitudTraslado::DESTINOS[$s['destino']] ?? $s['destino'];
+                    if ($s['destino'] === 'asignado' && $s['destino_usuario_nombre']) $destTxt .= ' → ' . $s['destino_usuario_nombre'];
+                    if ($s['destino'] === 'en_bodega' && $s['bodega_nombre']) $destTxt .= ' → ' . $s['bodega_nombre'];
                 ?>
-                    <tr>
+                    <tr class="<?= $porFirmar ? 'table-warning' : '' ?>">
                         <td>#<?= (int) $s['id'] ?></td>
                         <td class="text-nowrap"><?= htmlspecialchars(substr((string) $s['creado_en'], 0, 16)) ?></td>
-                        <td><?= htmlspecialchars($s['origen_nombre'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($destTxt) ?></td>
+                        <td><?= htmlspecialchars($origen) ?></td>
                         <td><?= htmlspecialchars($s['plaza_nombre'] ?? '—') ?></td>
-                        <td><?= htmlspecialchars($s['bodega_nombre'] ?? '—') ?></td>
                         <td class="text-center"><?= (int) ($s['activos_count'] ?? 0) ?></td>
                         <td><span class="badge bg-<?= $badge ?> text-uppercase"><?= $estados[$s['estado']] ?? $s['estado'] ?></span></td>
                         <td class="text-end">
                             <a href="index.php?controller=solicitud&action=ver&id=<?= (int) $s['id'] ?>"
                                class="btn btn-sm btn-outline-primary">
-                                <?= ($s['estado'] === 'pendiente' && !empty($puedeAprobar)) ? 'Revisar' : 'Ver' ?>
+                                <?= $porFirmar ? 'Firmar' : 'Ver' ?>
                             </a>
                         </td>
                     </tr>

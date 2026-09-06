@@ -6,20 +6,23 @@ use App\Models\Activo;
 use App\Models\Bodega;
 use App\Models\Movimiento;
 use App\Models\SolicitudTraslado;
+use App\Models\Tienda;
+use App\Models\Usuario;
 use App\Services\TrasladoService;
 use App\Helpers\ImageHelper;
 use App\Helpers\Permisos;
 
 /**
- * SolicitudTrasladoController — flujo "ingeniero manda su stock 'asignado' a
- * bodega con doble firma digital".
+ * SolicitudTrasladoController — solicitudes de MOVIMIENTO de activos con firma.
  *
- *   fs          → crea la solicitud, firma y la envía (queda 'pendiente')
- *   coordinador → ve las pendientes de sus plazas, firma y aprueba / rechaza
- *   admin       → como coordinador pero sobre cualquier plaza
+ *   destino    origen              lo aprueba / firma
+ *   --------   -----------------   --------------------------------
+ *   asignado   ingeniero A         el ingeniero B que recibe
+ *   en_bodega  ingeniero / tienda  un coordinador de la plaza
+ *   baja       ingeniero / tienda  un ATI de la plaza
+ *   garantia   ingeniero / tienda  un ATI  Y  un coordinador (doble firma)
  *
- * Al aprobar: TrasladoService mueve los activos a 'en_bodega' y registra la
- * bitácora (un movimiento por activo, mismo grupo_id + solicitud_traslado_id).
+ * Nada se ejecuta hasta reunir todas las firmas: ver App\Services\TrasladoService.
  */
 class SolicitudTrasladoController
 {
@@ -41,42 +44,52 @@ class SolicitudTrasladoController
             $this->error('No tienes acceso a Traslados.', 'index.php');
         }
 
-        $model    = new SolicitudTraslado($this->db);
-        $estado   = $_GET['estado'] ?? null;
-        $estado   = isset(SolicitudTraslado::ESTADOS[$estado]) ? $estado : null;
-        $puedeAprobar = Permisos::puedeAprobarTraslados();
+        $model  = new SolicitudTraslado($this->db);
+        $estado = $_GET['estado'] ?? null;
+        $estado = isset(SolicitudTraslado::ESTADOS[$estado]) ? $estado : null;
 
-        if ($puedeAprobar) {
-            if (Permisos::esAdmin()) {
-                $solicitudes = $model->listarTodas($estado);
-                $pendientes  = $model->contarPendientesTodas();
-            } else {
-                $plazas      = Permisos::misPlazas();
-                $solicitudes = $model->listarPorPlazas($plazas, $estado);
-                $pendientes  = $model->contarPendientesPorPlazas($plazas);
-            }
-        } else {
-            $solicitudes = $model->listarDeUsuario(Permisos::idUsuario());
-            $pendientes  = 0;
+        $uid       = Permisos::idUsuario();
+        $mias      = $model->listarDeUsuario($uid);
+        $porFirmar = Permisos::puedeAprobarTraslados()
+            ? $model->pendientesParaResolver($uid, Permisos::misPlazas(),
+                in_array(Permisos::tipo(), ['coordinador', 'admin'], true),
+                in_array(Permisos::tipo(), ['ati', 'admin'], true),
+                Permisos::esAdmin())
+            : [];
+
+        // La lista principal: unión de "mías" + "por firmar", sin duplicados.
+        $vistos = [];
+        $solicitudes = [];
+        foreach (array_merge($porFirmar, $mias) as $s) {
+            if (isset($vistos[$s['id']])) continue;
+            $vistos[$s['id']] = true;
+            if ($estado !== null && $s['estado'] !== $estado) continue;
+            $solicitudes[] = $s;
         }
+        $pendientes = count($porFirmar);
+        $porFirmarIds = array_column($porFirmar, 'id');
 
         $estados = SolicitudTraslado::ESTADOS;
         $fEstado = $estado ?? '';
         require ROOT_PATH . '/app/views/solicitudes/index.php';
     }
 
-    // ── Crear (fs) ───────────────────────────────────────────────────────────
+    // ── Crear ───────────────────────────────────────────────────────────────
 
     public function crear(): void
     {
         if (!Permisos::puedeCrearSolicitudTraslado()) {
-            $this->error('Solo los ingenieros de campo pueden crear solicitudes de traslado.', 'index.php?controller=solicitud&action=index');
+            $this->error('Sin permiso para crear solicitudes.', 'index.php?controller=solicitud&action=index');
         }
 
-        $plazaId  = Permisos::plazaId();
-        $activos  = $this->activosAsignadosDelUsuario(Permisos::idUsuario());
-        $bodegas  = $this->bodegasDePlaza($plazaId);
-        $bodegaDefault = $bodegas[0]['id'] ?? 0;
+        $uid     = Permisos::idUsuario();
+        $plazaId = Permisos::plazaId();
+
+        $misAsignados = $this->activosAsignadosDe($uid);
+        $bodegas      = $this->bodegasDePlaza($plazaId);
+        $ingenieros   = $this->ingenierosDePlaza($plazaId, $uid);
+        $tiendas      = $this->tiendasOperables($plazaId);
+        $destinos     = SolicitudTraslado::DESTINOS;
 
         require ROOT_PATH . '/app/views/solicitudes/crear.php';
     }
@@ -88,73 +101,106 @@ class SolicitudTrasladoController
         }
         $this->requerirPost();
 
-        $userId   = Permisos::idUsuario();
+        $uid      = Permisos::idUsuario();
         $plazaId  = Permisos::plazaId();
+        $destino  = (string) ($_POST['destino'] ?? '');
+        $origen   = (string) ($_POST['origen_tipo'] ?? 'asignado'); // 'asignado' | 'tienda'
         $activos  = array_values(array_unique(array_map('intval', $_POST['activos'] ?? [])));
-        $bodegaId = (int) ($_POST['destino_bodega_id'] ?? 0);
         $nota     = trim((string) ($_POST['nota'] ?? ''));
         $firmaRaw = (string) ($_POST['firma'] ?? '');
+        $volver   = 'index.php?controller=solicitud&action=crear';
 
-        if (!$activos) {
-            $this->error('Selecciona al menos un activo.', 'index.php?controller=solicitud&action=crear');
+        if (!isset(SolicitudTraslado::DESTINOS[$destino])) {
+            $this->error('Destino inválido.', $volver);
         }
-        if ($bodegaId <= 0) {
-            $this->error('Selecciona la bodega destino.', 'index.php?controller=solicitud&action=crear');
+        if (!$activos) {
+            $this->error('Selecciona al menos un activo.', $volver);
         }
         if ($firmaRaw === '') {
-            $this->error('Falta tu firma.', 'index.php?controller=solicitud&action=crear');
+            $this->error('Falta tu firma.', $volver);
         }
 
-        // Todos los activos deben ser stock personal del ingeniero y estar 'asignado'.
-        $validosIds = array_column($this->activosAsignadosDelUsuario($userId), 'id');
-        $validosIds = array_map('intval', $validosIds);
+        $datos = [
+            'destino'        => $destino,
+            'plaza_id'       => $plazaId,
+            'solicitante_id' => $uid,
+            'nota'           => $nota,
+            'grupo_id'       => Movimiento::nuevoGrupoId(),
+            'activos'        => $activos,
+        ];
+
+        // ── Origen ──────────────────────────────────────────────────────────
+        if ($origen === 'tienda') {
+            $tiendaId = (int) ($_POST['origen_tienda_id'] ?? 0);
+            $tiendasOk = array_map('intval', array_column($this->tiendasOperables($plazaId), 'id'));
+            if (!in_array($tiendaId, $tiendasOk, true)) {
+                $this->error('Tienda de origen inválida.', $volver);
+            }
+            $validos = array_map('intval', array_column($this->activosEnUsoDeTienda($tiendaId), 'id'));
+            $datos['origen_tienda_id'] = $tiendaId;
+        } else {
+            $validos = array_map('intval', array_column($this->activosAsignadosDe($uid), 'id'));
+            $datos['origen_usuario_id'] = $uid;
+        }
         foreach ($activos as $aid) {
-            if (!in_array($aid, $validosIds, true)) {
-                $this->error('Uno de los activos no está en tu stock personal o ya no está asignado.', 'index.php?controller=solicitud&action=crear');
+            if (!in_array($aid, $validos, true)) {
+                $this->error('Un activo no pertenece al origen seleccionado o ya cambió de estado.', $volver);
             }
         }
 
-        $model = new SolicitudTraslado($this->db);
-        $yaEnPendiente = $model->activosEnSolicitudPendiente($activos);
-        if ($yaEnPendiente) {
-            $this->error('Uno de los activos ya está en otra solicitud pendiente.', 'index.php?controller=solicitud&action=crear');
+        // ── Destino ─────────────────────────────────────────────────────────
+        if ($destino === 'en_bodega') {
+            $bodegaId  = (int) ($_POST['destino_bodega_id'] ?? 0);
+            $bodegasOk = array_map('intval', array_column($this->bodegasDePlaza($plazaId), 'id'));
+            if (!in_array($bodegaId, $bodegasOk, true)) {
+                $this->error('Bodega destino inválida.', $volver);
+            }
+            $datos['destino_bodega_id'] = $bodegaId;
+        } elseif ($destino === 'asignado') {
+            $destUid = (int) ($_POST['destino_usuario_id'] ?? 0);
+            if ($destUid <= 0 || $destUid === $uid) {
+                $this->error('Elige al ingeniero que recibe el equipo.', $volver);
+            }
+            $um = new Usuario($this->db);
+            if (!$um->obtenerPorId($destUid) || !$um->perteneceAPlaza($destUid, $plazaId)) {
+                $this->error('El ingeniero que recibe no pertenece a tu plaza.', $volver);
+            }
+            $datos['destino_usuario_id'] = $destUid;
         }
+        // baja / garantia: sin campo de destino extra.
 
-        // Validar bodega dentro de la plaza del ingeniero.
-        $bodegasOk = array_map('intval', array_column($this->bodegasDePlaza($plazaId), 'id'));
-        if (!in_array($bodegaId, $bodegasOk, true)) {
-            $this->error('La bodega seleccionada no pertenece a tu plaza.', 'index.php?controller=solicitud&action=crear');
+        $model = new SolicitudTraslado($this->db);
+        if ($model->activosEnSolicitudPendiente($activos)) {
+            $this->error('Un activo ya está en otra solicitud pendiente.', $volver);
         }
 
         $firma = ImageHelper::guardarFirma($firmaRaw, 'firma_sol');
         if (!$firma) {
-            $this->error('No se pudo procesar tu firma. Intenta de nuevo.', 'index.php?controller=solicitud&action=crear');
+            $this->error('No se pudo procesar tu firma. Intenta de nuevo.', $volver);
         }
+        $datos['firma_solicitante'] = $firma;
 
-        $id = $model->crear([
-            'plaza_id'          => $plazaId,
-            'origen_usuario_id' => $userId,
-            'destino_bodega_id' => $bodegaId,
-            'solicitante_id'    => $userId,
-            'firma_solicitante' => $firma,
-            'nota'              => $nota,
-            'grupo_id'          => Movimiento::nuevoGrupoId(),
-            'activos'           => $activos,
-        ]);
-
+        $id = $model->crear($datos);
         if ($id <= 0) {
-            $this->error('No se pudo crear la solicitud.', 'index.php?controller=solicitud&action=crear');
+            $this->error('No se pudo crear la solicitud.', $volver);
         }
 
-        $_SESSION['success'] = "Solicitud #{$id} enviada. Queda pendiente de la firma del coordinador.";
+        $quien = match ($destino) {
+            'asignado'  => 'del ingeniero que recibe',
+            'en_bodega' => 'de un coordinador',
+            'baja'      => 'del ATI',
+            'garantia'  => 'del ATI y de un coordinador',
+            default     => 'del aprobador',
+        };
+        $_SESSION['success'] = "Solicitud #{$id} enviada. Queda pendiente de la firma {$quien}.";
         $this->redirigir('index.php?controller=solicitud&action=ver&id=' . $id);
     }
 
-    // ── Ver / resolver ───────────────────────────────────────────────────────
+    // ── Ver / firmar / rechazar / cancelar ──────────────────────────────────
 
     public function ver(): void
     {
-        $id  = $this->idGet();
+        $id    = $this->idGet();
         $model = new SolicitudTraslado($this->db);
         $sol   = $model->obtenerPorId($id);
         if (!$sol) {
@@ -165,56 +211,68 @@ class SolicitudTrasladoController
         }
 
         $activos      = $model->activosDe($id);
-        $puedeResolver = $this->puedeResolver($sol);
+        $puedeFirmar  = $this->slotDeUsuario($sol) !== null;
         $puedeCancelar = $sol['estado'] === 'pendiente'
             && in_array(Permisos::idUsuario(), [(int) $sol['solicitante_id'], (int) $sol['origen_usuario_id']], true);
         $movimientos  = $sol['estado'] === 'aprobada' && !empty($sol['grupo_id'])
             ? $this->movimientosDelGrupo((string) $sol['grupo_id'])
             : [];
-        $estados = SolicitudTraslado::ESTADOS;
+        $estados  = SolicitudTraslado::ESTADOS;
+        $destinos = SolicitudTraslado::DESTINOS;
 
         require ROOT_PATH . '/app/views/solicitudes/ver.php';
     }
 
+    /** Registra la firma del usuario actual y, si ya están todas, ejecuta el movimiento. */
     public function aprobar(): void
     {
         $this->requerirPost();
         $id    = (int) ($_POST['id'] ?? 0);
         $model = new SolicitudTraslado($this->db);
         $sol   = $model->obtenerPorId($id);
+        $ver   = 'index.php?controller=solicitud&action=ver&id=' . $id;
 
         if (!$sol || $sol['estado'] !== 'pendiente') {
             $this->error('La solicitud no está pendiente.', 'index.php?controller=solicitud&action=index');
         }
-        if (!$this->puedeResolver($sol)) {
-            $this->error('No puedes aprobar esta solicitud.', 'index.php?controller=solicitud&action=ver&id=' . $id);
+        $slot = $this->slotDeUsuario($sol);
+        if ($slot === null) {
+            $this->error('No te corresponde firmar esta solicitud.', $ver);
         }
 
         $firmaRaw = (string) ($_POST['firma'] ?? '');
         if ($firmaRaw === '') {
-            $this->error('Falta tu firma para aprobar.', 'index.php?controller=solicitud&action=ver&id=' . $id);
+            $this->error('Falta tu firma.', $ver);
         }
         $firma = ImageHelper::guardarFirma($firmaRaw, 'firma_apr');
         if (!$firma) {
-            $this->error('No se pudo procesar tu firma. Intenta de nuevo.', 'index.php?controller=solicitud&action=ver&id=' . $id);
+            $this->error('No se pudo procesar tu firma.', $ver);
         }
+
+        $rol = $sol['destino'] === 'garantia'
+            ? ($slot === 1 ? 'ati' : 'coordinador')
+            : 'unico';
 
         try {
             $this->db->beginTransaction();
-            if (!$model->marcarAprobada($id, Permisos::idUsuario(), $firma)) {
-                throw new \RuntimeException('La solicitud cambió de estado.');
+            $r = $model->firmarAprobacion($id, Permisos::idUsuario(), $firma, $rol);
+            if ($r === false)  throw new \RuntimeException('La solicitud cambió de estado.');
+            if ($r === 'duplicada')  throw new \RuntimeException('Ese rol ya había firmado.');
+            if ($r === 'no_aplica')  throw new \RuntimeException('No te corresponde firmar esta solicitud.');
+            if ($r === 'lista') {
+                (new TrasladoService($this->db))->ejecutar($id, Permisos::idUsuario());
+                $model->marcarAprobada($id);
             }
-            (new TrasladoService($this->db))->ejecutar($id, Permisos::idUsuario());
             $this->db->commit();
         } catch (\Throwable $e) {
-            if ($this->db->inTransaction()) {
-                $this->db->rollBack();
-            }
-            $this->error('No se pudo aprobar: ' . $e->getMessage(), 'index.php?controller=solicitud&action=ver&id=' . $id);
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            $this->error('No se pudo firmar: ' . $e->getMessage(), $ver);
         }
 
-        $_SESSION['success'] = "Solicitud #{$id} aprobada. Los activos pasaron a bodega.";
-        $this->redirigir('index.php?controller=solicitud&action=ver&id=' . $id);
+        $_SESSION['success'] = ($r === 'lista')
+            ? "Solicitud #{$id} aprobada. El movimiento se ejecutó."
+            : "Firma registrada. Falta la otra firma para ejecutar el movimiento.";
+        $this->redirigir($ver);
     }
 
     public function rechazar(): void
@@ -224,33 +282,30 @@ class SolicitudTrasladoController
         $motivo = trim((string) ($_POST['motivo'] ?? ''));
         $model  = new SolicitudTraslado($this->db);
         $sol    = $model->obtenerPorId($id);
+        $ver    = 'index.php?controller=solicitud&action=ver&id=' . $id;
 
         if (!$sol || $sol['estado'] !== 'pendiente') {
             $this->error('La solicitud no está pendiente.', 'index.php?controller=solicitud&action=index');
         }
-        if (!$this->puedeResolver($sol)) {
-            $this->error('No puedes rechazar esta solicitud.', 'index.php?controller=solicitud&action=ver&id=' . $id);
+        if ($this->slotDeUsuario($sol) === null) {
+            $this->error('No te corresponde resolver esta solicitud.', $ver);
         }
         if ($motivo === '') {
-            $this->error('Indica el motivo del rechazo.', 'index.php?controller=solicitud&action=ver&id=' . $id);
+            $this->error('Indica el motivo del rechazo.', $ver);
         }
-
         if (!$model->marcarRechazada($id, Permisos::idUsuario(), $motivo)) {
-            $this->error('No se pudo rechazar (¿cambió de estado?).', 'index.php?controller=solicitud&action=ver&id=' . $id);
+            $this->error('No se pudo rechazar.', $ver);
         }
-
-        $_SESSION['success'] = "Solicitud #{$id} rechazada. Los activos siguen con el ingeniero.";
-        $this->redirigir('index.php?controller=solicitud&action=ver&id=' . $id);
+        $_SESSION['success'] = "Solicitud #{$id} rechazada. Los activos no se movieron.";
+        $this->redirigir($ver);
     }
 
     public function cancelar(): void
     {
         $this->requerirPost();
-        $id    = (int) ($_POST['id'] ?? 0);
-        $model = new SolicitudTraslado($this->db);
-
-        if (!$model->marcarCancelada($id, Permisos::idUsuario())) {
-            $this->error('No se pudo cancelar (solo el solicitante puede, y solo si está pendiente).', 'index.php?controller=solicitud&action=index');
+        $id = (int) ($_POST['id'] ?? 0);
+        if (!(new SolicitudTraslado($this->db))->marcarCancelada($id, Permisos::idUsuario())) {
+            $this->error('No se pudo cancelar (solo el solicitante, y solo si está pendiente).', 'index.php?controller=solicitud&action=index');
         }
         $_SESSION['success'] = "Solicitud #{$id} cancelada.";
         $this->redirigir('index.php?controller=solicitud&action=index');
@@ -258,60 +313,100 @@ class SolicitudTrasladoController
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    /** Activos del stock PERSONAL del usuario que están 'asignado'. */
-    private function activosAsignadosDelUsuario(int $usuarioId): array
+    private function activosAsignadosDe(int $usuarioId): array
     {
-        $res = (new Activo($this->db))->obtenerTodosFiltrado([
-            'stock_usuario_id' => $usuarioId,
-            'status'           => 'asignado',
-        ], 1, 1000);
-        return $res['activos'] ?? [];
+        return (new Activo($this->db))->obtenerTodosFiltrado(
+            ['stock_usuario_id' => $usuarioId, 'status' => 'asignado'], 1, 1000
+        )['activos'] ?? [];
     }
 
-    /** Bodegas candidatas de una plaza (OXXO primero, luego cualquiera). */
+    private function activosEnUsoDeTienda(int $tiendaId): array
+    {
+        return (new Activo($this->db))->obtenerTodosFiltrado(
+            ['tienda_id' => $tiendaId, 'status' => 'en_uso'], 1, 2000
+        )['activos'] ?? [];
+    }
+
     private function bodegasDePlaza(int $plazaId): array
     {
-        $bModel = new Bodega($this->db);
+        $b = new Bodega($this->db);
         $out = [];
-        $oxxo = $bModel->obtenerPorPlazaYNegocio($plazaId, 'oxxo');
-        if ($oxxo) {
-            $out[(int) $oxxo['id']] = $oxxo;
+        if ($oxxo = $b->obtenerPorPlazaYNegocio($plazaId, 'oxxo')) $out[(int) $oxxo['id']] = $oxxo;
+        if ($any  = $b->obtenerPorPlaza($plazaId))                 $out[(int) $any['id']] = $out[(int) $any['id']] ?? $any;
+        return array_values($out);
+    }
+
+    private function ingenierosDePlaza(int $plazaId, int $exceptoId): array
+    {
+        $us = (new Usuario($this->db))->obtenerPorPlaza($plazaId);
+        return array_values(array_filter($us, fn($u) =>
+            (int) $u['id'] !== $exceptoId && in_array($u['tipo'] ?? '', ['fs', 'ati', 'coordinador'], true)));
+    }
+
+    private function tiendasOperables(int $plazaId): array
+    {
+        if (Permisos::esAdmin()) {
+            return (new Tienda($this->db))->obtenerTodas();
         }
-        $cualquiera = $bModel->obtenerPorPlaza($plazaId);
-        if ($cualquiera) {
-            $out[(int) $cualquiera['id']] = $out[(int) $cualquiera['id']] ?? $cualquiera;
+        $out = [];
+        foreach (Permisos::misPlazas() ?: [$plazaId] as $pid) {
+            foreach ((new Tienda($this->db))->obtenerPorPlaza((int) $pid) as $t) {
+                $out[(int) $t['id']] = $t;
+            }
         }
         return array_values($out);
     }
 
     private function puedeVerSolicitud(array $sol): bool
     {
-        if (Permisos::esAdmin()) {
-            return true;
-        }
+        if (Permisos::esAdmin()) return true;
         $uid = Permisos::idUsuario();
-        if (in_array($uid, [(int) $sol['solicitante_id'], (int) $sol['origen_usuario_id']], true)) {
-            return true;
-        }
+        if (in_array($uid, array_map('intval', [
+            $sol['solicitante_id'], $sol['origen_usuario_id'] ?? 0,
+            $sol['destino_usuario_id'] ?? 0, $sol['aprobador_id'] ?? 0, $sol['aprobador2_id'] ?? 0,
+        ]), true)) return true;
         return Permisos::puedeAprobarTraslados()
             && in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
     }
 
-    private function puedeResolver(array $sol): bool
+    /**
+     * ¿En qué slot de firma puede firmar el usuario actual? 1, 2 o null.
+     *   destino=asignado → slot 1 solo el destino_usuario_id
+     *   destino=en_bodega → slot 1 coordinador (o admin) de la plaza
+     *   destino=baja → slot 1 ATI (o admin) de la plaza
+     *   destino=garantia → slot 1 ATI, slot 2 coordinador (o admin en el que falte)
+     */
+    private function slotDeUsuario(array $sol): ?int
     {
-        if (!Permisos::puedeAprobarTraslados() || $sol['estado'] !== 'pendiente') {
-            return false;
+        if ($sol['estado'] !== 'pendiente') return null;
+        $uid  = Permisos::idUsuario();
+        $tipo = Permisos::tipo();
+        $enPlaza = Permisos::esAdmin() || in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
+
+        switch ($sol['destino']) {
+            case 'asignado':
+                return ((int) ($sol['destino_usuario_id'] ?? 0) === $uid && empty($sol['aprobador_id'])) ? 1 : null;
+
+            case 'en_bodega':
+                return ($enPlaza && in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null;
+
+            case 'baja':
+                return ($enPlaza && in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null;
+
+            case 'garantia':
+                if (!$enPlaza) return null;
+                if (in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) return 1;
+                if (in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador2_id'])) return 2;
+                return null;
         }
-        return Permisos::esAdmin()
-            || in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
+        return null;
     }
 
     private function movimientosDelGrupo(string $grupoId): array
     {
         $stmt = $this->db->prepare(
-            "SELECT m.id, m.activo_id, m.evento, m.creado_en, a.serie, a.codigo_barras
-             FROM movimiento m
-             LEFT JOIN activo a ON a.id = m.activo_id
+            "SELECT m.id, m.activo_id, m.evento, m.status_anterior, m.status_nuevo, m.creado_en, a.serie, a.codigo_barras
+             FROM movimiento m LEFT JOIN activo a ON a.id = m.activo_id
              WHERE m.grupo_id = :g ORDER BY m.id"
         );
         $stmt->execute([':g' => $grupoId]);
@@ -328,9 +423,7 @@ class SolicitudTrasladoController
     private function idGet(): int
     {
         $id = (int) ($_GET['id'] ?? 0);
-        if ($id <= 0) {
-            $this->redirigir('index.php?controller=solicitud&action=index');
-        }
+        if ($id <= 0) $this->redirigir('index.php?controller=solicitud&action=index');
         return $id;
     }
 

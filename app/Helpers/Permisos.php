@@ -206,36 +206,59 @@ class Permisos
         return self::esAdmin();
     }
 
-    // ── Solicitudes de traslado a bodega (doble firma) ────────────────────────
+    // ── Solicitudes de movimiento con firma ──────────────────────────────────
+    // Todo cambio de dueño/estatus (salvo alta y instalación en tienda) pasa por
+    // una solicitud firmada. Cualquier rol puede crearlas.
 
-    /** Puede crear una solicitud de traslado (mandar su stock 'asignado' a bodega). */
+    /** Todos los roles operativos pueden iniciar una solicitud de movimiento. */
     public static function puedeCrearSolicitudTraslado(): bool
     {
-        return self::esFs();
+        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati'], true);
     }
 
-    /** Puede aprobar / rechazar solicitudes de traslado. */
+    /** Coordinador y ATI aprueban solicitudes (según el destino); admin cualquiera. */
     public static function puedeAprobarTraslados(): bool
     {
-        return in_array(self::tipo(), ['coordinador', 'admin'], true);
+        return in_array(self::tipo(), ['coordinador', 'ati', 'admin'], true);
     }
 
-    /** Puede ver la pantalla de Traslados (fs, coordinador, admin). */
+    /** Ve la pantalla de Traslados: todos los roles operativos. */
     public static function puedeVerTraslados(): bool
     {
-        return in_array(self::tipo(), ['fs', 'coordinador', 'admin'], true);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati'], true);
     }
 
-    /**
-     * Plazas sobre las que el usuario puede aprobar traslados.
-     * admin → [] (todas, sin filtro); coordinador → sus plazas; otros → [-1].
-     */
+    /** ¿Puede este usuario firmar una solicitud con este `destino`, según su rol? */
+    public static function puedeAprobarDestino(string $destino): bool
+    {
+        $t = self::tipo();
+        return match ($destino) {
+            'en_bodega' => in_array($t, ['coordinador', 'admin'], true),
+            'baja'      => in_array($t, ['ati', 'admin'], true),
+            'garantia'  => in_array($t, ['ati', 'coordinador', 'admin'], true),
+            'asignado'  => true, // lo valida el destino_usuario_id, no el rol
+            default     => false,
+        };
+    }
+
+    /** El "rol" con el que este usuario firma una solicitud (slot de firma). */
+    public static function rolAprobacion(): string
+    {
+        return match (self::tipo()) {
+            'ati'                  => 'ati',
+            'coordinador'          => 'coordinador',
+            'admin'               => 'admin', // el controlador decide el slot que falte
+            default               => 'ingeniero',
+        };
+    }
+
+    /** admin → [] (todas); coordinador/ati → sus plazas; otros → [-1]. */
     public static function plazasParaAprobar(): array
     {
         return match (self::tipo()) {
-            'admin'       => [],
-            'coordinador' => self::misPlazas(),
-            default       => [-1],
+            'admin'                => [],
+            'coordinador', 'ati'   => self::misPlazas(),
+            default               => [-1],
         };
     }
 
