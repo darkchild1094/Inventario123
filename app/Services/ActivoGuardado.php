@@ -138,12 +138,13 @@ class ActivoGuardado
             }
 
             // 2) Todo cambio de dueño/estatus de un activo que hoy está en manos
-            //    de un ingeniero (asignado) o de una tienda (en_uso) requiere una
-            //    Solicitud de movimiento firmada — para TODOS los roles, incluido
-            //    admin. Excepciones: instalar/mover a tienda ('en_uso'),
-            //    reasignar al MISMO ingeniero, y quedarse igual.
+            //    de un ingeniero (asignado), de una tienda (en_uso) o de una
+            //    bodega (en_bodega) requiere una Solicitud de movimiento firmada
+            //    — para TODOS los roles, incluido admin. Excepciones:
+            //    instalar/mover a tienda ('en_uso'), reasignar al MISMO
+            //    ingeniero, y quedarse igual.
             $stAntes = $antes['status'] ?? '';
-            if (in_array($stAntes, ['asignado', 'en_uso'], true) && $status !== $stAntes && $status !== 'en_uso') {
+            if (in_array($stAntes, ['asignado', 'en_uso', 'en_bodega'], true) && $status !== $stAntes && $status !== 'en_uso') {
                 $mismoDueno = $status === 'asignado' && $stAntes === 'asignado'
                     && (int) ($post['asignado_usuario_id'] ?? 0) === (int) ($antes['usuario_stock_id'] ?? 0);
                 if (!$mismoDueno && in_array($status, ['asignado', 'en_bodega', 'baja', 'garantia'], true)) {

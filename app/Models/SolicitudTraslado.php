@@ -53,7 +53,7 @@ class SolicitudTraslado
     /**
      * @param array $d  destino, plaza_id, solicitante_id, firma_solicitante,
      *                  nota, grupo_id, activos (int[]),
-     *                  origen_usuario_id|null, origen_tienda_id|null,
+     *                  origen_usuario_id|null, origen_tienda_id|null, origen_bodega_id|null,
      *                  destino_bodega_id|null, destino_usuario_id|null
      * @return int  id (0 si falla)
      */
@@ -69,11 +69,11 @@ class SolicitudTraslado
 
             $stmt = $this->conn->prepare(
                 "INSERT INTO {$this->table}
-                    (estado, destino, plaza_id, origen_usuario_id, origen_tienda_id,
+                    (estado, destino, plaza_id, origen_usuario_id, origen_tienda_id, origen_bodega_id,
                      destino_bodega_id, destino_usuario_id, solicitante_id,
                      firma_solicitante, firmado_solicitante_en, nota, grupo_id)
                  VALUES
-                    ('pendiente', :destino, :plaza_id, :origen_usuario_id, :origen_tienda_id,
+                    ('pendiente', :destino, :plaza_id, :origen_usuario_id, :origen_tienda_id, :origen_bodega_id,
                      :destino_bodega_id, :destino_usuario_id, :solicitante_id,
                      :firma_solicitante, CURRENT_TIMESTAMP, :nota, :grupo_id)"
             );
@@ -82,6 +82,7 @@ class SolicitudTraslado
                 ':plaza_id'           => (int) $d['plaza_id'],
                 ':origen_usuario_id'  => !empty($d['origen_usuario_id']) ? (int) $d['origen_usuario_id'] : null,
                 ':origen_tienda_id'   => !empty($d['origen_tienda_id']) ? (int) $d['origen_tienda_id'] : null,
+                ':origen_bodega_id'   => !empty($d['origen_bodega_id']) ? (int) $d['origen_bodega_id'] : null,
                 ':destino_bodega_id'  => !empty($d['destino_bodega_id']) ? (int) $d['destino_bodega_id'] : null,
                 ':destino_usuario_id' => !empty($d['destino_usuario_id']) ? (int) $d['destino_usuario_id'] : null,
                 ':solicitante_id'     => (int) $d['solicitante_id'],
@@ -115,6 +116,7 @@ class SolicitudTraslado
         b.nombre  AS bodega_nombre,
         uo.nombre AS origen_nombre,
         ot.nombre AS origen_tienda_nombre,
+        ob.nombre AS origen_bodega_nombre,
         ud.nombre AS destino_usuario_nombre,
         us.nombre AS solicitante_nombre,
         ua.nombre AS aprobador_nombre,
@@ -125,6 +127,7 @@ class SolicitudTraslado
         LEFT JOIN bodega  b   ON b.id  = s.destino_bodega_id
         LEFT JOIN usuario uo  ON uo.id = s.origen_usuario_id
         LEFT JOIN tienda  ot  ON ot.id = s.origen_tienda_id
+        LEFT JOIN bodega  ob  ON ob.id = s.origen_bodega_id
         LEFT JOIN usuario ud  ON ud.id = s.destino_usuario_id
         LEFT JOIN usuario us  ON us.id = s.solicitante_id
         LEFT JOIN usuario ua  ON ua.id = s.aprobador_id

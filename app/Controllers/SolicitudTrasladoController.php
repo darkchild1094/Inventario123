@@ -90,6 +90,9 @@ class SolicitudTrasladoController
         $ingenieros   = $this->ingenierosDePlaza($plazaId, $uid);
         $tiendas      = $this->tiendasOperables($plazaId);
         $destinos     = SolicitudTraslado::DESTINOS;
+        // Sacar equipo DE una bodega también requiere solicitud firmada; solo lo
+        // puede iniciar quien administra la bodega (coordinador / admin).
+        $puedeOrigenBodega = in_array(Permisos::tipo(), ['coordinador', 'admin'], true);
 
         require ROOT_PATH . '/app/views/solicitudes/crear.php';
     }
@@ -104,7 +107,7 @@ class SolicitudTrasladoController
         $uid      = Permisos::idUsuario();
         $plazaId  = Permisos::plazaId();
         $destino  = (string) ($_POST['destino'] ?? '');
-        $origen   = (string) ($_POST['origen_tipo'] ?? 'asignado'); // 'asignado' | 'tienda'
+        $origen   = (string) ($_POST['origen_tipo'] ?? 'asignado'); // 'asignado' | 'tienda' | 'bodega'
         $activos  = array_values(array_unique(array_map('intval', $_POST['activos'] ?? [])));
         $nota     = trim((string) ($_POST['nota'] ?? ''));
         $firmaRaw = (string) ($_POST['firma'] ?? '');
@@ -138,6 +141,20 @@ class SolicitudTrasladoController
             }
             $validos = array_map('intval', array_column($this->activosEnUsoDeTienda($tiendaId), 'id'));
             $datos['origen_tienda_id'] = $tiendaId;
+        } elseif ($origen === 'bodega') {
+            if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
+                $this->error('Solo un coordinador o admin puede sacar equipo de bodega.', $volver);
+            }
+            $bodegaId  = (int) ($_POST['origen_bodega_id'] ?? 0);
+            $bodegasOk = array_map('intval', array_column($this->bodegasDePlaza($plazaId), 'id'));
+            if (!in_array($bodegaId, $bodegasOk, true)) {
+                $this->error('Bodega de origen inválida.', $volver);
+            }
+            if ($destino === 'en_bodega') {
+                $this->error('El equipo ya está en bodega; elige otro destino.', $volver);
+            }
+            $validos = array_map('intval', array_column($this->activosEnBodega($bodegaId), 'id'));
+            $datos['origen_bodega_id'] = $bodegaId;
         } else {
             $validos = array_map('intval', array_column($this->activosAsignadosDe($uid), 'id'));
             $datos['origen_usuario_id'] = $uid;
@@ -324,6 +341,13 @@ class SolicitudTrasladoController
     {
         return (new Activo($this->db))->obtenerTodosFiltrado(
             ['tienda_id' => $tiendaId, 'status' => 'en_uso'], 1, 2000
+        )['activos'] ?? [];
+    }
+
+    private function activosEnBodega(int $bodegaId): array
+    {
+        return (new Activo($this->db))->obtenerTodosFiltrado(
+            ['bodega_id' => $bodegaId, 'status' => 'en_bodega'], 1, 5000
         )['activos'] ?? [];
     }
 

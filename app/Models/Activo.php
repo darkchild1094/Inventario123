@@ -48,6 +48,7 @@ class Activo
         $status           = $filtros['status']           ?? null;
         $busqueda         = $filtros['busqueda']         ?? null;
         $solo_bodega      = $filtros['solo_bodega']      ?? false;
+        $bodega_id        = $filtros['bodega_id']        ?? null;
 
         $sqlBase = "FROM {$this->table} a
                     LEFT JOIN modelo      mo  ON a.modelo_id             = mo.id
@@ -122,6 +123,10 @@ class Activo
         }
         if ($solo_bodega) {
             $sqlBase .= " AND s.tipo = 'bodega'";
+        }
+        if ($bodega_id) {
+            $sqlBase .= " AND s.tipo = 'bodega' AND s.bodega_id = :bodega_id";
+            $params[':bodega_id'] = (int) $bodega_id;
         }
         if ($busqueda) {
             // Un placeholder por columna: los prepares nativos (EMULATE_PREPARES=false)

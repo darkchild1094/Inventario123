@@ -533,6 +533,31 @@ class ApiController
         $this->json((new Activo($this->db))->enTiendaPorDispositivo($tiendaId, $dispositivoId, $exceptoId));
     }
 
+    // GET ?action=obtenerActivosEnBodega&bodega_id=X
+    // Alimenta el selector de activos cuando el origen de una solicitud es una bodega.
+    public function obtenerActivosEnBodega(): void
+    {
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) { $this->json([]); return; }
+        $bodegaId = (int) ($_GET['bodega_id'] ?? 0);
+        if ($bodegaId <= 0) { $this->json([]); return; }
+        if (!Permisos::esAdmin()) {
+            $ok = array_map('intval', array_column($this->bodegasDePlazaApi(Permisos::plazaId()), 'id'));
+            if (!in_array($bodegaId, $ok, true)) { $this->json([]); return; }
+        }
+        $activos = (new Activo($this->db))->obtenerTodosFiltrado(
+            ['bodega_id' => $bodegaId, 'status' => 'en_bodega'], 1, 5000
+        )['activos'] ?? [];
+        $this->json(array_map(fn($a) => [
+            'id'                 => (int) $a['id'],
+            'serie'              => $a['serie'] ?? null,
+            'codigo_barras'      => $a['codigo_barras'] ?? null,
+            'num_activo'         => $a['num_activo'] ?? null,
+            'marca_nombre'       => $a['marca_nombre'] ?? null,
+            'modelo_nombre'      => $a['modelo_nombre'] ?? null,
+            'dispositivo_nombre' => $a['dispositivo_nombre'] ?? null,
+        ], $activos));
+    }
+
     // ── Catálogo de modelos (solo admin) ──────────────────────────────────
 
     public function listarModelos(): void
@@ -692,8 +717,8 @@ class ApiController
     }
 
     // POST (multipart) ?action=crearSolicitud
-    //   destino=asignado|en_bodega|baja|garantia, origen_tipo=asignado|tienda,
-    //   origen_tienda_id?, destino_bodega_id?, destino_usuario_id?, activos[]=, nota=, firma=<file>
+    //   destino=asignado|en_bodega|baja|garantia, origen_tipo=asignado|tienda|bodega,
+    //   origen_tienda_id?, origen_bodega_id?, destino_bodega_id?, destino_usuario_id?, activos[]=, nota=, firma=<file>
     public function crearSolicitud(): void
     {
         $this->requerirPost();
@@ -723,6 +748,21 @@ class ApiController
             $validos = array_map('intval', array_column(
                 (new Activo($this->db))->obtenerTodosFiltrado(['tienda_id' => $tiendaId, 'status' => 'en_uso'], 1, 2000)['activos'] ?? [], 'id'));
             $datos['origen_tienda_id'] = $tiendaId;
+        } elseif ($origen === 'bodega') {
+            if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
+                $this->json(['success' => false, 'message' => 'Solo un coordinador o admin puede sacar equipo de bodega.'], 403);
+            }
+            if ($destino === 'en_bodega') {
+                $this->json(['success' => false, 'message' => 'El equipo ya está en bodega; elige otro destino.'], 400);
+            }
+            $bodegaId  = (int) ($_POST['origen_bodega_id'] ?? 0);
+            $bodegasOk = array_map('intval', array_column($this->bodegasDePlazaApi($plazaId), 'id'));
+            if (!in_array($bodegaId, $bodegasOk, true)) {
+                $this->json(['success' => false, 'message' => 'Bodega de origen inválida.'], 400);
+            }
+            $validos = array_map('intval', array_column(
+                (new Activo($this->db))->obtenerTodosFiltrado(['bodega_id' => $bodegaId, 'status' => 'en_bodega'], 1, 5000)['activos'] ?? [], 'id'));
+            $datos['origen_bodega_id'] = $bodegaId;
         } else {
             $validos = array_map('intval', array_column($this->activosAsignadosDe($uid), 'id'));
             $datos['origen_usuario_id'] = $uid;

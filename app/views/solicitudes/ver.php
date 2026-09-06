@@ -34,7 +34,9 @@ $badge = match ($sol['estado']) {
 
         <?php
         $destTxt = $destinos[$sol['destino']] ?? $sol['destino'];
-        $origen  = $sol['origen_nombre'] ?: ($sol['origen_tienda_nombre'] ? 'Tienda ' . $sol['origen_tienda_nombre'] : '—');
+        $origen  = $sol['origen_nombre']
+            ?: ($sol['origen_tienda_nombre'] ? 'Tienda ' . $sol['origen_tienda_nombre'] : null)
+            ?: ($sol['origen_bodega_nombre'] ? 'Bodega ' . $sol['origen_bodega_nombre'] : '—');
         ?>
         <dl class="row mb-3">
             <dt class="col-sm-3">Movimiento</dt><dd class="col-sm-9"><strong><?= htmlspecialchars($destTxt) ?></strong></dd>

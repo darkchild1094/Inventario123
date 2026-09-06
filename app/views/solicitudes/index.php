@@ -54,7 +54,7 @@
                         'rechazada' => 'danger', 'cancelada' => 'secondary', default => 'light text-dark',
                     };
                     $porFirmar = in_array($s['id'], $porFirmarIds ?? [], true);
-                    $origen = $s['origen_nombre'] ?: ($s['origen_tienda_nombre'] ?: '—');
+                    $origen = $s['origen_nombre'] ?: ($s['origen_tienda_nombre'] ?: ($s['origen_bodega_nombre'] ?: '—'));
                     $destTxt = \App\Models\SolicitudTraslado::DESTINOS[$s['destino']] ?? $s['destino'];
                     if ($s['destino'] === 'asignado' && $s['destino_usuario_nombre']) $destTxt .= ' → ' . $s['destino_usuario_nombre'];
                     if ($s['destino'] === 'en_bodega' && $s['bodega_nombre']) $destTxt .= ' → ' . $s['bodega_nombre'];
