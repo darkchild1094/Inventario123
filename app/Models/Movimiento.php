@@ -253,11 +253,14 @@ class Movimiento
             }
         }
 
-        // Scope FS: su propio stock de usuario + todo lo de tiendas
+        // Scope FS: su propio stock de usuario + todo lo de tiendas.
+        // Un placeholder por columna: con prepares nativos (EMULATE_PREPARES=false)
+        // no se puede reutilizar el mismo :nombre varias veces.
         if (!empty($filtros['fs_scope'])) {
             $where .= ' AND (m.tienda_id IS NOT NULL
-                             OR sn.usuario_id = :fs_scope OR so.usuario_id = :fs_scope)';
-            $params[':fs_scope'] = (int) $filtros['fs_scope'];
+                             OR sn.usuario_id = :fs_scope_a OR so.usuario_id = :fs_scope_b)';
+            $params[':fs_scope_a'] = (int) $filtros['fs_scope'];
+            $params[':fs_scope_b'] = (int) $filtros['fs_scope'];
         }
 
         $stmtC = $this->conn->prepare(
