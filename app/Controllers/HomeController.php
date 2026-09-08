@@ -100,6 +100,34 @@ class HomeController
             Permisos::requerir(['admin', 'coordinador']);
         }
 
+        // ── Navegación por módulos (tiene prioridad sobre "vista") ────────────
+        $moduloActual = trim((string) ($_GET['modulo'] ?? ''));
+        $tituloModulo = '';
+        if ($moduloActual !== '') {
+            if (!Permisos::moduloPermitido($moduloActual)) {
+                $this->redirigir('index.php?controller=dashboard');
+            }
+            $filtros = array_merge(Permisos::filtrosModulo($moduloActual), [
+                'dispositivo_id' => $_GET['dispositivo_id'] ?? null,
+                'status'         => $statusFiltro,
+                'busqueda'       => $_GET['busqueda'] ?? null,
+            ]);
+            $tiendaGet = (int) ($_GET['tienda_id'] ?? 0);
+            if ($tiendaGet > 0) {
+                $tt = (new Tienda($this->db))->obtenerPorId($tiendaGet);
+                if ($tt && (Permisos::esAdmin() || in_array((int) $tt['plaza_id'], Permisos::misPlazas(), true))) {
+                    $filtros['tienda_id'] = $tiendaGet;
+                }
+            }
+            foreach (Permisos::modulos() as $m) {
+                if ($m['clave'] === $moduloActual) { $tituloModulo = $m['etiqueta']; break; }
+            }
+            $vista = $moduloActual;
+        }
+        $tiendaCtx = (!empty($filtros['tienda_id']))
+            ? (new Tienda($this->db))->obtenerPorId((int) $filtros['tienda_id'])
+            : null;
+
         $pagina    = max(1, (int) ($_GET['pagina'] ?? 1));
         $resultado = (new Activo($this->db))->obtenerTodosFiltrado($filtros, $pagina, 20);
 
@@ -194,7 +222,7 @@ class HomeController
 
     public function crear(): void
     {
-        Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
         [
             $dispositivos, $tiendas, $plazas,
             $regiones, $negocios, $usuarios, $bodegas,
@@ -252,13 +280,20 @@ class HomeController
 
     public function guardar(): void
     {
-        Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') $this->redirigir('index.php');
 
         $datos         = $this->datosDesdePost();
         $negocioIdPost = (int) ($_POST['negocio_id'] ?? 0);
         $plazaId       = $this->resolverPlazaFormulario($negocioIdPost);
         $redirectCrear = 'index.php?action=crear&negocio_id=' . $negocioIdPost . '&plaza_id=' . $plazaId;
+        $moduloForm    = trim((string) ($_POST['modulo'] ?? ''));
+        if ($moduloForm !== '' && Permisos::moduloPermitido($moduloForm)) {
+            $redirectCrear .= '&modulo=' . urlencode($moduloForm);
+            if (!empty($_POST['tienda_uso_id'])) {
+                $redirectCrear .= '&tienda_uso_id=' . (int) $_POST['tienda_uso_id'];
+            }
+        }
 
         // Imágenes
         $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
@@ -320,7 +355,7 @@ class HomeController
 
     public function editar(): void
     {
-        Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
         $id     = (int) ($_GET['id'] ?? 0);
         $activo = (new Activo($this->db))->obtenerPorId($id);
 
@@ -350,7 +385,7 @@ class HomeController
 
     public function actualizar(): void
     {
-        Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') $this->redirigir('index.php');
 
         $id     = (int) ($_POST['id'] ?? 0);
@@ -440,7 +475,7 @@ class HomeController
 
     public function exportar(): void
     {
-        Permisos::requerir(['admin', 'coordinador', 'fs', 'ati']);
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
 
         // Usar filtros de exportación según matriz de roles:
         // admin → todo | coordinador/ati → su plaza | fs → su stock
@@ -457,7 +492,7 @@ class HomeController
     {
         return match($tipo) {
             'admin' => 'todos',
-            'fs'    => 'mi_stock',
+            'pfs'   => 'mi_stock',
             'ati'   => 'mi_stock',
             default => 'bodega',
         };
@@ -465,8 +500,8 @@ class HomeController
 
     private function vistaPermitida(string $vista, string $tipo): string
     {
-        // fs solo puede ver mi_stock
-        if ($tipo === 'fs' && $vista !== 'mi_stock') return 'mi_stock';
+        // pfs solo puede ver mi_stock
+        if ($tipo === 'pfs' && $vista !== 'mi_stock') return 'mi_stock';
         // ati puede ver mi_stock o bodega (bodega = su plaza)
         if ($tipo === 'ati' && $vista === 'todos') return 'bodega';
         return $vista;

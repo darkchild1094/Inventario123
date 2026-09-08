@@ -26,7 +26,7 @@ $plazaId   = (int)($_SESSION['usuario']['plaza_id'] ?? 0);
 $usuarioId = (int)($_SESSION['usuario']['id']       ?? 0);
 
 $esAdmin = in_array($tipo, ['admin', 'coordinador']);
-$esFs    = $tipo === 'fs';
+$esFs    = $tipo === 'pfs';
 $esAti   = $tipo === 'ati';
 
 // Status actual del activo
@@ -50,7 +50,7 @@ if (empty($tiendasPlaza)) $tiendasPlaza = array_values($tiendas);
 // Usuarios de la plaza (para ATI/admin)
 $usuariosPlaza = array_values(array_filter($usuarios, fn($u) =>
     (int)($u['plaza_id'] ?? 0) === $plazaId &&
-    in_array($u['tipo'], ['fs', 'ati', 'coordinador'])
+    in_array($u['tipo'], ['pfs', 'ati', 'coordinador'])
 ));
 
 // Los admin no están atados a una plaza específica (acceso global), por
@@ -225,7 +225,7 @@ if ($stockTipo === 'usuario') {
                                     <i class="fas fa-user-circle text-primary fa-lg"></i>
                                     <div>
                                         <div class="fw-bold"><?= htmlspecialchars($usuarioActual['nombre'] ?? '—') ?></div>
-                                        <small class="text-muted text-uppercase">FS · Stock personal</small>
+                                        <small class="text-muted text-uppercase">PFS · Stock personal</small>
                                     </div>
                                 </div>
 
@@ -244,7 +244,7 @@ if ($stockTipo === 'usuario') {
                                 <select name="asignado_usuario_id" id="select_asignado" class="form-select">
                                     <option value="">Seleccione usuario...</option>
                                     <?php foreach ($usuarios as $u): ?>
-                                        <?php if (in_array($u['tipo'], ['admin', 'fs', 'ati', 'coordinador'])): ?>
+                                        <?php if (in_array($u['tipo'], ['admin', 'pfs', 'ati', 'coordinador'])): ?>
                                             <option value="<?= $u['id'] ?>"
                                                 <?= (int)$u['id'] === ($usuarioAsignadoId ?? 0) ? 'selected' : '' ?>>
                                                 <?= htmlspecialchars($u['nombre']) ?>
@@ -368,7 +368,7 @@ if ($stockTipo === 'usuario') {
                                         </option>
                                     <?php endforeach; ?>
                                     <?php foreach ($usuarios as $u): ?>
-                                        <?php if (in_array($u['tipo'], ['fs', 'ati', 'coordinador'])): ?>
+                                        <?php if (in_array($u['tipo'], ['pfs', 'ati', 'coordinador'])): ?>
                                             <option value="usuario_<?= $u['id'] ?>"
                                                 <?= ($stockTipo === 'usuario' && (int)$u['id'] === ($usuarioAsignadoId ?? 0)) ? 'selected' : '' ?>>
                                                 👤 <?= htmlspecialchars($u['nombre']) ?> (<?= strtoupper($u['tipo']) ?>)

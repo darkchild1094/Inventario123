@@ -48,7 +48,10 @@ class Activo
         $status           = $filtros['status']           ?? null;
         $busqueda         = $filtros['busqueda']         ?? null;
         $solo_bodega      = $filtros['solo_bodega']      ?? false;
+        $solo_tienda      = $filtros['solo_tienda']      ?? false;
         $bodega_id        = $filtros['bodega_id']        ?? null;
+        $stock_usuario_tipo   = $filtros['stock_usuario_tipo']   ?? null;
+        $identificador_exacto = $filtros['identificador_exacto'] ?? null;
 
         $sqlBase = "FROM {$this->table} a
                     LEFT JOIN modelo      mo  ON a.modelo_id             = mo.id
@@ -124,9 +127,32 @@ class Activo
         if ($solo_bodega) {
             $sqlBase .= " AND s.tipo = 'bodega'";
         }
+        if ($solo_tienda) {
+            $sqlBase .= " AND s.tipo = 'tienda'";
+        }
         if ($bodega_id) {
             $sqlBase .= " AND s.tipo = 'bodega' AND s.bodega_id = :bodega_id";
             $params[':bodega_id'] = (int) $bodega_id;
+        }
+        if ($stock_usuario_tipo) {
+            $tipos = array_values(array_filter(array_map(
+                fn($t) => preg_replace('/[^a-z_]/', '', strtolower((string) $t)),
+                (array) $stock_usuario_tipo
+            )));
+            if ($tipos) {
+                $ph = [];
+                foreach ($tipos as $i => $t) {
+                    $ph[] = ":sut{$i}";
+                    $params[":sut{$i}"] = $t;
+                }
+                $sqlBase .= " AND s.tipo = 'usuario' AND u.tipo IN (" . implode(',', $ph) . ')';
+            }
+        }
+        if ($identificador_exacto !== null && $identificador_exacto !== '') {
+            $sqlBase .= ' AND (a.serie = :ident_a OR a.codigo_barras = :ident_b OR a.num_activo = :ident_c)';
+            $params[':ident_a'] = $identificador_exacto;
+            $params[':ident_b'] = $identificador_exacto;
+            $params[':ident_c'] = $identificador_exacto;
         }
         if ($busqueda) {
             // Un placeholder por columna: los prepares nativos (EMULATE_PREPARES=false)
@@ -425,6 +451,23 @@ class Activo
         if (!empty($filtros['stock_usuario_id'])) {
             $from .= " AND s.tipo = 'usuario' AND s.usuario_id = :suid";
             $params[':suid'] = (int) $filtros['stock_usuario_id'];
+        }
+        if (!empty($filtros['solo_bodega'])) {
+            $from .= " AND s.tipo = 'bodega'";
+        }
+        if (!empty($filtros['solo_tienda'])) {
+            $from .= " AND s.tipo = 'tienda'";
+        }
+        if (!empty($filtros['stock_usuario_tipo'])) {
+            $tipos = array_values(array_filter(array_map(
+                fn($t) => preg_replace('/[^a-z_]/', '', strtolower((string) $t)),
+                (array) $filtros['stock_usuario_tipo']
+            )));
+            if ($tipos) {
+                $ph = [];
+                foreach ($tipos as $i => $t) { $ph[] = ":rsut{$i}"; $params[":rsut{$i}"] = $t; }
+                $from .= " AND s.tipo = 'usuario' AND u.tipo IN (" . implode(',', $ph) . ')';
+            }
         }
 
         $run = function (string $sql) use ($params) {

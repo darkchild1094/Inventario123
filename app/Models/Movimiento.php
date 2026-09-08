@@ -193,7 +193,7 @@ class Movimiento
     /**
      * Listado paginado con filtros y scope de rol.
      * Filtros: activo_id, serie, evento, tienda_id, usuario_id (actor),
-     * plaza_id (int|int[]), desde, hasta (YYYY-MM-DD), fs_scope (usuario_id).
+     * plaza_id (int|int[]), desde, hasta (YYYY-MM-DD), pfs_scope (usuario_id).
      */
     public function listar(array $filtros = [], int $pagina = 1, int $porPagina = 30): array
     {
@@ -253,14 +253,16 @@ class Movimiento
             }
         }
 
-        // Scope FS: su propio stock de usuario + todo lo de tiendas.
+        // Scope PFS: su propio stock de usuario + todo lo de tiendas.
         // Un placeholder por columna: con prepares nativos (EMULATE_PREPARES=false)
         // no se puede reutilizar el mismo :nombre varias veces.
-        if (!empty($filtros['fs_scope'])) {
+        // 'fs_scope' se acepta como alias legado por si llega de un cliente viejo.
+        $pfsScope = $filtros['pfs_scope'] ?? $filtros['fs_scope'] ?? null;
+        if (!empty($pfsScope)) {
             $where .= ' AND (m.tienda_id IS NOT NULL
-                             OR sn.usuario_id = :fs_scope_a OR so.usuario_id = :fs_scope_b)';
-            $params[':fs_scope_a'] = (int) $filtros['fs_scope'];
-            $params[':fs_scope_b'] = (int) $filtros['fs_scope'];
+                             OR sn.usuario_id = :pfs_scope_a OR so.usuario_id = :pfs_scope_b)';
+            $params[':pfs_scope_a'] = (int) $pfsScope;
+            $params[':pfs_scope_b'] = (int) $pfsScope;
         }
 
         $stmtC = $this->conn->prepare(

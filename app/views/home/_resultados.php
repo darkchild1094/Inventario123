@@ -147,7 +147,7 @@
                     <p class="text-muted small">
                         <?php if (!empty($busqueda) || !empty($negocio_id) || !empty($region_id) || !empty($plaza_id) || !empty($tienda_id) || !empty($usuario_id) || !empty($status)): ?>
                             No se encontraron resultados con los filtros aplicados.
-                            <a href="index.php?vista=<?= htmlspecialchars($vista) ?>" class="text-decoration-none">Limpiar filtros</a>
+                            <a href="index.php?<?= !empty($_GET['modulo']) ? 'modulo=' . urlencode((string) $_GET['modulo']) : 'vista=' . htmlspecialchars($vista) ?>" class="text-decoration-none">Limpiar filtros</a>
                         <?php else: ?>
                             Aún no hay activos registrados.
                         <?php endif; ?>

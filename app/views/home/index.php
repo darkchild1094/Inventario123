@@ -11,11 +11,26 @@
 
 <div class="container py-4">
 
+    <?php
+    $moduloActual = $moduloActual ?? '';
+    $tituloModulo = $tituloModulo ?? '';
+    $tiendaCtx    = $tiendaCtx ?? null;
+    $iconosModulo = [
+        'tiendas' => 'fa-store', 'bodega' => 'fa-warehouse', 'mi_stock' => 'fa-toolbox',
+        'stock_pfs' => 'fa-people-carry-box', 'ati' => 'fa-user-gear',
+    ];
+    ?>
     <!-- Encabezado -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2 class="h3 text-gray-800 fw-bold mb-0">
-                <?php if ($vista === 'mi_stock'): ?>
+                <?php if ($moduloActual !== ''): ?>
+                    <i class="fas <?= $iconosModulo[$moduloActual] ?? 'fa-list' ?> text-primary me-2"></i>
+                    <?= htmlspecialchars($tiendaCtx ? $tiendaCtx['nombre'] : ($tituloModulo ?: 'Activos')) ?>
+                    <?php if ($tiendaCtx): ?>
+                        <a href="index.php?controller=tienda&action=index" class="small text-decoration-none ms-2">&larr; Tiendas</a>
+                    <?php endif; ?>
+                <?php elseif ($vista === 'mi_stock'): ?>
                     <i class="fas fa-toolbox text-primary me-2"></i> Mi Stock
                 <?php elseif ($vista === 'todos'): ?>
                     <i class="fas fa-list text-primary me-2"></i> Todos los Activos
@@ -29,14 +44,32 @@
                 </small>
             <?php endif; ?>
         </div>
-        <?php /* Nuevo Activo está en la navbar */ ?>
+        <?php if ($moduloActual !== ''): ?>
+            <div class="d-flex gap-2">
+                <?php if (\App\Helpers\Permisos::moduloEditable($moduloActual)): ?>
+                    <a href="index.php?action=crear&modulo=<?= urlencode($moduloActual) ?><?= !empty($filtros['tienda_id']) ? '&tienda_uso_id=' . (int) $filtros['tienda_id'] : '' ?>"
+                       class="btn btn-primary"><i class="fas fa-plus me-1"></i> Nuevo</a>
+                <?php endif; ?>
+                <?php if (\App\Helpers\Permisos::puedeExportar()): ?>
+                    <a href="index.php?controller=export&action=modulo&modulo=<?= urlencode($moduloActual) ?><?= !empty($filtros['tienda_id']) ? '&tienda_id=' . (int) $filtros['tienda_id'] : '' ?>"
+                       class="btn btn-outline-success"><i class="fas fa-file-excel me-1"></i> Exportar</a>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     </div>
 
     <!-- Filtros -->
     <div class="card shadow-sm border-0 mb-4">
         <div class="card-body">
             <form method="GET" action="index.php" id="formFiltros" class="row g-3 align-items-end">
-                <input type="hidden" name="vista" value="<?= htmlspecialchars($vista) ?>">
+                <?php if ($moduloActual !== ''): ?>
+                    <input type="hidden" name="modulo" value="<?= htmlspecialchars($moduloActual) ?>">
+                    <?php if (!empty($filtros['tienda_id'])): ?>
+                        <input type="hidden" name="tienda_id" value="<?= (int) $filtros['tienda_id'] ?>">
+                    <?php endif; ?>
+                <?php else: ?>
+                    <input type="hidden" name="vista" value="<?= htmlspecialchars($vista) ?>">
+                <?php endif; ?>
 
                 <div class="col-md-3">
                     <label class="form-label text-muted small fw-bold mb-1">Búsqueda rápida</label>
@@ -136,7 +169,7 @@
                 </div>
 
                 <div class="col-md-2">
-                    <a href="index.php?vista=<?= htmlspecialchars($vista) ?>"
+                    <a href="index.php?<?= $moduloActual !== '' ? 'modulo=' . urlencode($moduloActual) . (!empty($filtros['tienda_id']) ? '&tienda_id=' . (int) $filtros['tienda_id'] : '') : 'vista=' . htmlspecialchars($vista) ?>"
                        class="btn btn-outline-secondary w-100">
                         <i class="fas fa-sync-alt me-1"></i> Limpiar
                     </a>

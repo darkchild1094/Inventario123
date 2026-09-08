@@ -114,6 +114,90 @@ class ExportController
         $this->descargarExcel($spreadsheet, 'Inventario_' . date('Y-m-d_H-i') . '.xlsx');
     }
 
+    /**
+     * Exporta SÓLO los activos de un módulo (Tiendas, Bodega, Mi Stock,
+     * Stock PFS, ATI), acotado al rol. ?modulo=<m>[&tienda_id=][&plaza_id=]
+     */
+    public function modulo(): void
+    {
+        $this->verificarPermisos();
+        @set_time_limit(600);
+        @ini_set('memory_limit', '768M');
+
+        $modulo = trim((string) ($_GET['modulo'] ?? ''));
+        if ($modulo === '' || !Permisos::moduloPermitido($modulo)) {
+            $_SESSION['error'] = 'Módulo inválido para exportar.';
+            header('Location: index.php?controller=dashboard');
+            exit;
+        }
+
+        $filtros = Permisos::filtrosModulo($modulo);
+
+        $tiendaId = (int) ($_GET['tienda_id'] ?? 0);
+        if ($tiendaId > 0) {
+            $t = (new \App\Models\Tienda($this->db))->obtenerPorId($tiendaId);
+            if ($t && (Permisos::esAdmin() || in_array((int) $t['plaza_id'], Permisos::misPlazas(), true))) {
+                $filtros['tienda_id'] = $tiendaId;
+            }
+        }
+        $plazaGet = (int) ($_GET['plaza_id'] ?? 0);
+        if ($plazaGet > 0 && (Permisos::esAdmin() || in_array($plazaGet, Permisos::misPlazas(), true))) {
+            $filtros['plaza_id'] = $plazaGet;
+        }
+
+        $activos = (new Activo($this->db))->obtenerTodosFiltrado($filtros, 1, 999_999)['activos'] ?? [];
+
+        // Agrupar según el módulo.
+        $grupos = [];
+        $modo   = 'bodega';
+        switch ($modulo) {
+            case 'tiendas':
+                $modo = 'tienda';
+                foreach ($activos as $a) $grupos[$this->claveTienda($a)][] = $a;
+                break;
+            case 'bodega':
+                $modo = 'bodega';
+                foreach ($activos as $a) $grupos[$this->claveUbicacion($a)][] = $a;
+                break;
+            default: // mi_stock | stock_pfs | ati → stock personal, por ingeniero
+                $modo = 'usuario';
+                foreach ($activos as $a) $grupos[$this->claveUsuario($a)][] = $a;
+                break;
+        }
+        ksort($grupos);
+        if (!$grupos) { $grupos = ['SIN DATOS' => []]; }
+
+        $rutaPlantilla = ROOT_PATH . '/storage/templates/inventario_bodega.xlsx';
+        if (!file_exists($rutaPlantilla)) die('Error: No se encontró la plantilla de Excel.');
+
+        $spreadsheet = IOFactory::load($rutaPlantilla);
+        $hojaBase    = $spreadsheet->getActiveSheet();
+        $hojaMolde   = clone $hojaBase;
+        $esPrimera   = true;
+        $movModel    = new Movimiento($this->db);
+
+        foreach ($grupos as $nombre => $lista) {
+            $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
+            if (!$esPrimera) $spreadsheet->addSheet($hoja);
+            $this->llenarHoja($hoja, $lista, (string) $nombre, $modo);
+            $esPrimera = false;
+
+            // Para stock personal, añade la pestaña de movimientos del ingeniero.
+            if ($modo === 'usuario' && !empty($lista)) {
+                $engId = (int) ($lista[0]['usuario_stock_id'] ?? 0);
+                if ($engId > 0) {
+                    $movs = $movModel->listar(['usuario_id' => $engId], 1, 100_000)['movimientos'] ?? [];
+                    if ($movs) {
+                        $this->llenarHojaMovimientos($spreadsheet->createSheet(), $movs, $nombre . ' - MOV');
+                    }
+                }
+            }
+        }
+
+        $etiqueta = preg_replace('/[^A-Za-z0-9_]+/', '', ucfirst($modulo));
+        $this->descargarExcel($spreadsheet, "Inventario_{$etiqueta}_" . date('Y-m-d_H-i') . '.xlsx');
+    }
+
     // ── Privados ──────────────────────────────────────────────────────────────
 
     private function agruparActivos(array $activos): array
@@ -372,7 +456,7 @@ class ExportController
 
     private function verificarPermisos(): void
     {
-        $tiposPermitidos = ['admin', 'coordinador', 'ati', 'fs'];
+        $tiposPermitidos = ['admin', 'coordinador', 'ati', 'pfs'];
         $tipoSesion      = $_SESSION['usuario_tipo'] ?? $_SESSION['usuario']['tipo'] ?? '';
         if (!in_array($tipoSesion, $tiposPermitidos, true)) {
             $esAjax = (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest')

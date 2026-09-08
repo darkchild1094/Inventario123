@@ -77,7 +77,7 @@
                 <label class="form-label fw-semibold">Tipo <span class="text-danger">*</span></label>
                 <select name="tipo" class="form-select" required>
                     <?php
-                    $tipos = ['fs' => 'FS — Field Service', 'ati' => 'ATI — Asesor TI', 'coordinador' => 'Coordinador', 'admin' => 'Admin'];
+                    $tipos = ['pfs' => 'PFS — Personal de Field Service', 'ati' => 'ATI — Asesor TI', 'coordinador' => 'Coordinador', 'admin' => 'Admin'];
                     foreach ($tipos as $val => $label):
                     ?>
                         <option value="<?= $val ?>" <?= ($usuario['tipo'] ?? '') === $val ? 'selected' : '' ?>>

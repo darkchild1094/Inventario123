@@ -65,7 +65,7 @@
             <div class="col-md-3">
                 <label class="form-label fw-semibold">Tipo <span class="text-danger">*</span></label>
                 <select name="tipo" class="form-select" required>
-                    <option value="fs">FS — Field Service</option>
+                    <option value="pfs">PFS — Personal de Field Service</option>
                     <option value="ati">ATI — Asesor TI</option>
                     <option value="coordinador">Coordinador</option>
                     <option value="admin">Admin</option>

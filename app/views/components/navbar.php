@@ -31,7 +31,7 @@ $plazaUsuario  = $_SESSION['usuario']['plaza_nombre'] ?? '';
 $idUsuario     = $_SESSION['usuario']['id'] ?? '';
 $badgeColor = match ($tipo) {
     'admin' => 'danger', 'coordinador' => 'warning text-dark',
-    'fs' => 'primary', 'ati' => 'info text-dark', default => 'secondary',
+    'pfs' => 'primary', 'ati' => 'info text-dark', default => 'secondary',
 };
 ?>
 
@@ -117,41 +117,36 @@ $badgeColor = match ($tipo) {
     </a>
 
     <nav class="app-nav">
-        <a class="<?= $esDash ? 'active' : '' ?>" href="index.php?controller=dashboard">
-            <i class="fas fa-gauge-high"></i> Inicio
-        </a>
-
-        <?php if (in_array($tipo, ['admin', 'coordinador', 'ati'], true)): ?>
-            <a class="<?= $vistaAc === 'bodega' ? 'active' : '' ?>" href="index.php?vista=bodega">
-                <i class="fas fa-warehouse"></i> Bodega
+        <?php
+        $moduloAc = $_GET['modulo'] ?? '';
+        $modulos  = \App\Helpers\Permisos::modulos();
+        foreach ($modulos as $m):
+            $clave = $m['clave'];
+            if ($clave === 'dashboard'):
+                $href = 'index.php?controller=dashboard';
+                $activo = $esDash;
+            elseif ($clave === 'consulta'):
+                $href = 'index.php?controller=consulta&action=index';
+                $activo = $ctrl === 'consulta';
+            elseif ($clave === 'usuarios'):
+                continue; // va en la sección Administración
+            else:
+                $href = 'index.php?modulo=' . urlencode($clave);
+                $activo = $moduloAc === $clave;
+            endif;
+        ?>
+            <a class="<?= $activo ? 'active' : '' ?>" href="<?= $href ?>">
+                <i class="fas <?= htmlspecialchars($m['icono']) ?>"></i> <?= htmlspecialchars($m['etiqueta']) ?>
             </a>
-        <?php endif; ?>
+        <?php endforeach; ?>
 
-        <?php if (in_array($tipo, ['fs', 'ati'], true)): ?>
-            <a class="<?= $vistaAc === 'mi_stock' ? 'active' : '' ?>" href="index.php?vista=mi_stock">
-                <i class="fas fa-toolbox"></i> Mi Stock
-            </a>
-        <?php endif; ?>
-
-        <?php if (in_array($tipo, ['admin', 'coordinador'], true)): ?>
-            <a class="<?= $vistaAc === 'todos' ? 'active' : '' ?>" href="index.php?vista=todos">
-                <i class="fas fa-list"></i> Todos
-            </a>
-        <?php endif; ?>
-
-        <?php if (in_array($tipo, ['admin', 'coordinador', 'fs', 'ati'], true)): ?>
-            <a class="<?= $act === 'crear' && $ctrl === '' ? 'active' : '' ?>" href="index.php?action=crear">
-                <i class="fas fa-plus-circle"></i> Nuevo activo
-            </a>
-        <?php endif; ?>
-
-        <?php if (in_array($tipo, ['admin', 'coordinador', 'fs', 'ati'], true)): ?>
+        <?php if (in_array($tipo, ['admin', 'coordinador', 'pfs', 'ati'], true)): ?>
             <a class="<?= $ctrl === 'historial' ? 'active' : '' ?>" href="index.php?controller=historial&action=index">
                 <i class="fas fa-clock-rotate-left"></i> Historial
             </a>
         <?php endif; ?>
 
-        <?php if (in_array($tipo, ['fs', 'coordinador', 'admin'], true)): ?>
+        <?php if (in_array($tipo, ['pfs', 'coordinador', 'admin', 'ati'], true)): ?>
             <a class="<?= $ctrl === 'solicitud' ? 'active' : '' ?>" href="index.php?controller=solicitud&action=index">
                 <i class="fas fa-right-left"></i> Traslados
                 <?php if ($pendTraslados > 0): ?>
@@ -160,17 +155,8 @@ $badgeColor = match ($tipo) {
             </a>
         <?php endif; ?>
 
-        <?php if (in_array($tipo, ['admin', 'coordinador', 'fs', 'ati'], true)): ?>
-            <a href="index.php?controller=export&action=inventario">
-                <i class="fas fa-file-excel text-success"></i> Exportar
-            </a>
-        <?php endif; ?>
-
         <?php if ($tipo === 'admin'): ?>
             <div class="app-sep">Administración</div>
-            <a class="<?= $ctrl === 'tienda' ? 'active' : '' ?>" href="index.php?controller=tienda&action=index">
-                <i class="fas fa-store"></i> Tiendas
-            </a>
             <a class="<?= $ctrl === 'modelo' ? 'active' : '' ?>" href="index.php?controller=modelo&action=index">
                 <i class="fas fa-tags"></i> Catálogo
             </a>

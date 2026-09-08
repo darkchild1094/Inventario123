@@ -197,7 +197,7 @@ class ActivoGuardado
             $ctx['plaza_id']  = (int) $tienda['plaza_id'];
         } elseif ($status === 'asignado') {
             $destino = (int) ($post['asignado_usuario_id'] ?? 0) ?: $actorId;
-            if ($tipo === 'fs') {
+            if ($tipo === 'pfs') {
                 $destino = $actorId;
             } elseif (in_array($tipo, ['ati', 'coordinador'], true) && $destino !== $actorId) {
                 $um = new Usuario($this->db);

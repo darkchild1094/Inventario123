@@ -47,7 +47,7 @@
         <?php endif; ?>
         <div class="mt-2">
             <?php
-            $tipoClases = ['admin'=>'bg-danger','coordinador'=>'bg-warning text-dark','fs'=>'bg-primary','ati'=>'bg-info text-dark'];
+            $tipoClases = ['admin'=>'bg-danger','coordinador'=>'bg-warning text-dark','pfs'=>'bg-primary','ati'=>'bg-info text-dark'];
             $clase = $tipoClases[$usuario['tipo']] ?? 'bg-secondary';
             ?>
             <span class="badge rounded-pill <?= $clase ?> px-3 py-2">

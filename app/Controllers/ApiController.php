@@ -57,7 +57,9 @@ class ApiController
                 'plazaId'               => Permisos::plazaId(),
                 'plazasIds'             => Permisos::plazasIds(),
             ],
-            // Pestañas visibles en la navbar, según rol (mismo criterio que components/navbar.php)
+            // Navegación por módulos (fuente única: Permisos::modulos()).
+            'modulos' => Permisos::modulos(),
+            // Compat con la app publicada (navegación por "vista").
             'vistasDisponibles' => $this->vistasDisponiblesParaTipo($tipo),
         ]);
     }
@@ -77,11 +79,21 @@ class ApiController
                 Permisos::esAdmin()));
         }
 
-        $this->json([
+        // Conteo por módulo visible (para las tarjetas del dashboard).
+        $activoModel = new Activo($this->db);
+        $porModulo = [];
+        foreach (Permisos::modulos() as $m) {
+            $clave = $m['clave'];
+            if (in_array($clave, ['dashboard', 'consulta', 'usuarios'], true)) continue;
+            $porModulo[$clave] = $activoModel->resumen(Permisos::filtrosModulo($clave))['total'];
+        }
+
+        $salida = [
             'total'            => $resumen['total'],
             'por_status'       => $resumen['por_status'],
             'por_dispositivo'  => $resumen['por_dispositivo'],
             'por_plaza'        => $resumen['por_plaza'],
+            'por_modulo'       => $porModulo,
             'traslados_pendientes' => $pendTraslados,
             'movimientos'      => array_map(fn($m) => [
                 'evento'      => $m['evento'],
@@ -89,7 +101,26 @@ class ApiController
                 'equipo'      => trim(($m['eq_dispositivo'] ?? '') . ' ' . trim(($m['eq_marca'] ?? '') . ' ' . ($m['eq_modelo'] ?? ''))),
                 'serie'       => $m['eq_serie'] ?? $m['eq_codigo_barras'] ?? $m['eq_num_activo'] ?? null,
             ], $movs),
-        ]);
+        ];
+
+        // Bloque técnico para admin (salud del sistema y catálogo).
+        if (Permisos::esAdmin()) {
+            $solPorEstado = array_fill_keys(array_keys(SolicitudTraslado::ESTADOS), 0);
+            foreach ($this->db->query("SELECT estado, COUNT(*) n FROM solicitud_traslado GROUP BY estado") as $r) {
+                $solPorEstado[$r['estado']] = (int) $r['n'];
+            }
+            $sinModelo = (int) $this->db->query("SELECT COUNT(*) FROM activo WHERE modelo_id IS NULL")->fetchColumn();
+            $salida['tecnico'] = [
+                'usuarios'             => count((new Usuario($this->db))->obtenerTodos()),
+                'tiendas'              => count((new Tienda($this->db))->obtenerTodas()),
+                'modelos'             => count((new Modelo($this->db))->obtenerTodos()),
+                'bodegas'             => count((new Bodega($this->db))->obtenerTodas()),
+                'solicitudes_por_estado' => $solPorEstado,
+                'activos_sin_modelo'  => $sinModelo,
+            ];
+        }
+
+        $this->json($salida);
     }
 
     // ── Activos ───────────────────────────────────────────────────────────────
@@ -98,54 +129,65 @@ class ApiController
     {
         $tipo    = Permisos::tipo();
         $plazaId = Permisos::plazaId();
-        $vista   = $_GET['vista'] ?? $this->vistaDefaultParaTipo($tipo);
-        $vista   = $this->vistaPermitida($vista, $tipo);
 
-        $scope   = Permisos::filtrosScope();
         $statusFiltro = $_GET['status'] ?? null;
-        if ($statusFiltro !== null && $statusFiltro !== '') {
-            $statusFiltro = Activo::normalizarStatus((string) $statusFiltro);
-        } else {
-            $statusFiltro = null;
-        }
+        $statusFiltro = ($statusFiltro !== null && $statusFiltro !== '')
+            ? Activo::normalizarStatus((string) $statusFiltro)
+            : null;
 
-        $filtros = array_merge($scope, [
+        $comun = [
             'dispositivo_id' => $_GET['dispositivo_id'] ?? null,
             'status'         => $statusFiltro,
             'busqueda'       => $_GET['busqueda']       ?? null,
-            'solo_bodega'    => false,
-        ]);
+        ];
 
-        if (Permisos::puedeVerTodasPlazas()) {
-            $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
-            $filtros['region_id']  = $_GET['region_id']  ?? null;
-            $filtros['plaza_id']   = $_GET['plaza_id']   ?? null;
-            $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
-            $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
-        } elseif ($tipo === 'coordinador') {
-            $misPlazas = Permisos::plazasIds() ?: [$plazaId];
-            $plazaGet  = (int) ($_GET['plaza_id'] ?? 0);
-            $filtros['plaza_id']   = ($plazaGet > 0 && in_array($plazaGet, $misPlazas, true))
-                ? $plazaGet
-                : $misPlazas;
-            $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
-            $filtros['region_id']  = $_GET['region_id']  ?? null;
-            $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
-            $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
-        } elseif ($tipo === 'ati') {
-            $filtros['plaza_id'] = $plazaId;
-        }
+        $modulo = trim((string) ($_GET['modulo'] ?? ''));
 
-        if ($vista === 'bodega') {
-            if (!Permisos::puedeVerBodega()) {
-                $this->json(['success' => false, 'message' => 'No tienes acceso a esta vista.'], 403);
+        if ($modulo !== '') {
+            // ── Navegación nueva por módulos ──────────────────────────────────
+            if (!Permisos::moduloPermitido($modulo)) {
+                $this->json(['success' => false, 'message' => 'No tienes acceso a este módulo.'], 403);
             }
-            $filtros['solo_bodega'] = true;
-        } elseif ($vista === 'mi_stock') {
-            $filtros['stock_usuario_id'] = Permisos::idUsuario();
-            unset($filtros['plaza_id']);
+            $filtros = array_merge(Permisos::filtrosModulo($modulo), $comun);
+            $filtros = $this->aplicarAcotadores($filtros, $modulo);
+            $vista   = $modulo;
+        } else {
+            // ── Compat: navegación por "vista" ───────────────────────────────
+            $vista = $_GET['vista'] ?? $this->vistaDefaultParaTipo($tipo);
+            $vista = $this->vistaPermitida($vista, $tipo);
+
+            $filtros = array_merge(Permisos::filtrosScope(), $comun, ['solo_bodega' => false]);
+
+            if (Permisos::puedeVerTodasPlazas()) {
+                $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
+                $filtros['region_id']  = $_GET['region_id']  ?? null;
+                $filtros['plaza_id']   = $_GET['plaza_id']   ?? null;
+                $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
+                $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
+            } elseif ($tipo === 'coordinador') {
+                $misPlazas = Permisos::plazasIds() ?: [$plazaId];
+                $plazaGet  = (int) ($_GET['plaza_id'] ?? 0);
+                $filtros['plaza_id']   = ($plazaGet > 0 && in_array($plazaGet, $misPlazas, true))
+                    ? $plazaGet
+                    : $misPlazas;
+                $filtros['negocio_id'] = $_GET['negocio_id'] ?? null;
+                $filtros['region_id']  = $_GET['region_id']  ?? null;
+                $filtros['tienda_id']  = $_GET['tienda_id']  ?? null;
+                $filtros['usuario_id'] = $_GET['usuario_id'] ?? null;
+            } elseif ($tipo === 'ati') {
+                $filtros['plaza_id'] = $plazaId;
+            }
+
+            if ($vista === 'bodega') {
+                if (!Permisos::puedeVerBodega()) {
+                    $this->json(['success' => false, 'message' => 'No tienes acceso a esta vista.'], 403);
+                }
+                $filtros['solo_bodega'] = true;
+            } elseif ($vista === 'mi_stock') {
+                $filtros['stock_usuario_id'] = Permisos::idUsuario();
+                unset($filtros['plaza_id']);
+            }
         }
-        // vista === 'todos': sin filtro adicional, ya viene acotado por $scope
 
         $pagina    = max(1, (int) ($_GET['pagina']     ?? 1));
         $porPagina = max(1, (int) ($_GET['por_pagina'] ?? 20));
@@ -159,9 +201,42 @@ class ApiController
             return $a;
         }, $resultado['activos'] ?? []);
 
-        $resultado['vista'] = $vista;
+        $resultado['vista']  = $vista;
+        $resultado['modulo'] = $modulo ?: null;
+        $resultado['moduloEditable'] = $modulo !== '' && Permisos::moduloEditable($modulo);
 
         $this->json($resultado);
+    }
+
+    /**
+     * Acotadores opcionales del listado por módulo (tienda_id, plaza_id,
+     * region_id, dispositivo_id), validados contra el scope del rol. Admin
+     * puede acotar a cualquier plaza; el resto sólo a las suyas.
+     */
+    private function aplicarAcotadores(array $filtros, string $modulo): array
+    {
+        $misPlazas = Permisos::misPlazas();
+        $esAdmin   = Permisos::esAdmin();
+
+        $tiendaId = (int) ($_GET['tienda_id'] ?? 0);
+        if ($tiendaId > 0) {
+            $tienda = (new Tienda($this->db))->obtenerPorId($tiendaId);
+            if ($tienda && ($esAdmin || in_array((int) $tienda['plaza_id'], $misPlazas, true))) {
+                $filtros['tienda_id'] = $tiendaId;
+            }
+        }
+
+        $plazaGet = (int) ($_GET['plaza_id'] ?? 0);
+        if ($plazaGet > 0 && ($esAdmin || in_array($plazaGet, $misPlazas, true))) {
+            $filtros['plaza_id'] = $plazaGet;
+        }
+
+        $regionGet = (int) ($_GET['region_id'] ?? 0);
+        if ($regionGet > 0) {
+            $filtros['region_id'] = $regionGet;
+        }
+
+        return $filtros;
     }
 
     public function obtenerActivo(): void
@@ -179,6 +254,90 @@ class ApiController
         $activo['puedeEditar']   = Permisos::puedeEditarActivoConcreto($activo);
         $activo['puedeEliminar'] = Permisos::puedeEliminarActivo($activo);
         $this->json($activo);
+    }
+
+    // GET ?action=consultar&q=<serie|codigo_barras|num_activo>
+    // Módulo "Consulta": identifica un equipo y devuelve dónde está y su
+    // historial. Alcance GLOBAL (cualquier usuario autenticado, sólo lectura):
+    // sirve para saber a qué tienda pertenece un activo que te encontraste.
+    public function consultar(): void
+    {
+        $q = trim((string) ($_GET['q'] ?? $_GET['busqueda'] ?? ''));
+        if ($q === '') {
+            $this->json(['success' => false, 'message' => 'Escribe o escanea una serie o código.'], 400);
+        }
+
+        $activoModel = new Activo($this->db);
+
+        // 1) Coincidencia exacta por serie / código de barras / N° de activo.
+        $exactos = $activoModel->obtenerTodosFiltrado(['identificador_exacto' => $q], 1, 25)['activos'] ?? [];
+
+        if (count($exactos) === 1) {
+            $id     = (int) $exactos[0]['id'];
+            $activo = $activoModel->obtenerPorId($id) ?: $exactos[0];
+            $this->json([
+                'encontrado' => true,
+                'activo'     => $activo,
+                'ubicacion'  => $this->ubicacionDeActivo($activo),
+                'historial'  => (new Movimiento($this->db))->porActivo($id),
+            ]);
+        }
+
+        // 2) Varias exactas (serie duplicada) o ninguna → lista de coincidencias.
+        $filas = $exactos;
+        if (!$filas) {
+            $filas = $activoModel->obtenerTodosFiltrado(['busqueda' => $q], 1, 10)['activos'] ?? [];
+        }
+        if (!$filas) {
+            $this->json(['encontrado' => false, 'message' => 'Sin coincidencias para «' . $q . '».'], 404);
+        }
+
+        $this->json([
+            'encontrado'   => true,
+            'coincidencias' => array_map(fn($a) => [
+                'id'                 => (int) $a['id'],
+                'serie'              => $a['serie'] ?? null,
+                'codigo_barras'      => $a['codigo_barras'] ?? null,
+                'num_activo'         => $a['num_activo'] ?? null,
+                'dispositivo_nombre' => $a['dispositivo_nombre'] ?? null,
+                'modelo_nombre'      => $a['modelo_nombre'] ?? null,
+                'marca_nombre'       => $a['marca_nombre'] ?? null,
+                'status'             => $a['status'] ?? null,
+                'ubicacion_corta'    => $this->ubicacionCorta($a),
+            ], $filas),
+        ]);
+    }
+
+    /** Ubicación estructurada de un activo, a partir de su fila enriquecida. */
+    private function ubicacionDeActivo(array $a): array
+    {
+        return [
+            'stock_tipo'         => $a['stock_tipo'] ?? null,
+            'tienda_stock'       => $a['tienda_stock_nombre'] ?? null,
+            'bodega'             => $a['bodega_nombre'] ?? null,
+            'usuario'            => $a['usuario_nombre'] ?? null,
+            'tienda_uso'         => $a['tienda_uso_nombre'] ?? null,
+            'procedencia'        => $a['procedencia_nombre'] ?? null,
+            'plaza_nombre'       => $a['plaza_nombre'] ?? null,
+            'region_nombre'      => $a['region_nombre'] ?? null,
+            'negocio_nombre'     => $a['negocio_nombre'] ?? null,
+            'status'             => $a['status'] ?? null,
+            'resumen'            => $this->ubicacionCorta($a),
+        ];
+    }
+
+    /** Texto de una línea con la ubicación actual del activo. */
+    private function ubicacionCorta(array $a): string
+    {
+        $tipo = $a['stock_tipo'] ?? '';
+        $base = match ($tipo) {
+            'tienda'  => 'Tienda ' . ($a['tienda_stock_nombre'] ?? $a['tienda_uso_nombre'] ?? '—'),
+            'bodega'  => 'Bodega ' . ($a['bodega_nombre'] ?? '—'),
+            'usuario' => 'Con ' . ($a['usuario_nombre'] ?? '—'),
+            default   => 'Sin ubicación',
+        };
+        $plaza = $a['plaza_nombre'] ?? '';
+        return $plaza !== '' ? "{$base} · {$plaza}" : $base;
     }
 
     public function guardarActivo(): void
@@ -512,6 +671,29 @@ class ApiController
     {
         if (empty($_GET['plaza_id'])) { $this->json([]); return; }
         $this->json((new Tienda($this->db))->obtenerPorPlaza((int) $_GET['plaza_id']));
+    }
+
+    // GET ?action=listarTiendas[&plaza_id=X][&busqueda=...]
+    // Lista del módulo "Tiendas": acotada al rol, con nº de activos por tienda.
+    public function listarTiendas(): void
+    {
+        $busqueda = $_GET['busqueda'] ?? null;
+        $plazaGet = (int) ($_GET['plaza_id'] ?? 0);
+
+        if (Permisos::esAdmin()) {
+            $plazaIds = $plazaGet > 0 ? [$plazaGet] : [];
+        } else {
+            $misPlazas = Permisos::misPlazas();
+            $plazaIds  = ($plazaGet > 0 && in_array($plazaGet, $misPlazas, true))
+                ? [$plazaGet]
+                : $misPlazas;
+            if (!$plazaIds) { $this->json([]); return; }
+        }
+
+        $this->json([
+            'tiendas'      => (new Tienda($this->db))->listarConConteo($plazaIds, $busqueda),
+            'puedeAsignarAti' => Permisos::puedeGestionarTiendas(),
+        ]);
     }
 
     /** admin ve cualquier plaza; el resto sólo las suyas. */
@@ -1084,7 +1266,8 @@ class ApiController
             }
 
             session_regenerate_id(true);
-            $tipo = strtolower(trim($usuario['tipo'] ?? 'fs'));
+            $tipo = strtolower(trim($usuario['tipo'] ?? 'pfs'));
+            if ($tipo === 'fs') $tipo = 'pfs'; // compat: BD sin migrar (026)
 
             $_SESSION['usuario'] = [
                 'id'           => $usuario['id'],
@@ -1131,7 +1314,7 @@ class ApiController
     {
         return match ($tipo) {
             'admin' => 'todos',
-            'fs'    => 'mi_stock',
+            'pfs'   => 'mi_stock',
             'ati'   => 'mi_stock',
             default => 'bodega',
         };
@@ -1139,16 +1322,20 @@ class ApiController
 
     private function vistaPermitida(string $vista, string $tipo): string
     {
-        if ($tipo === 'fs' && $vista !== 'mi_stock') return 'mi_stock';
+        if ($tipo === 'pfs' && $vista !== 'mi_stock') return 'mi_stock';
         return $vista;
     }
 
+    /**
+     * Compatibilidad con la app publicada (navegación por "vista"). La nueva
+     * navegación por módulos usa Permisos::modulos(); esto se deriva de ahí.
+     */
     private function vistasDisponiblesParaTipo(string $tipo): array
     {
         return match ($tipo) {
             'admin', 'coordinador' => ['bodega', 'todos'],
             'ati'                  => ['bodega', 'mi_stock', 'todos'],
-            'fs'                   => ['mi_stock'],
+            'pfs'                  => ['mi_stock'],
             default                => [],
         };
     }

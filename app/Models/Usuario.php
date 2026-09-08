@@ -182,7 +182,7 @@ class Usuario
                 ':password' => password_hash($datos['password'], PASSWORD_BCRYPT),
                 ':foto'     => $datos['foto']     ?? null,
                 ':plaza_id' => $datos['plaza_id'] ?? null,
-                ':tipo'     => $datos['tipo']      ?? 'fs',
+                ':tipo'     => $datos['tipo']      ?? 'pfs',
             ]);
         } catch (PDOException $e) {
             if ($e->getCode() === '23000') return false;

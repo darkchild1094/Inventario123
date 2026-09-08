@@ -90,7 +90,7 @@ class UsuarioController
             'nombre'   => trim($_POST['nombre']),
             'email'    => $email,
             'password' => $_POST['password'],
-            'tipo'     => $_POST['tipo'] ?? 'fs',
+            'tipo'     => $_POST['tipo'] ?? 'pfs',
             'plaza_id' => $mainPlaza,
             'foto'     => $foto,
         ];
@@ -161,7 +161,7 @@ class UsuarioController
             'id'       => $id,
             'nombre'   => trim($_POST['nombre']),
             'email'    => $email,
-            'tipo'     => $_POST['tipo'] ?? 'fs',
+            'tipo'     => $_POST['tipo'] ?? 'pfs',
             'plaza_id' => $mainPlaza,
         ];
 

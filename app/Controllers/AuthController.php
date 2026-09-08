@@ -92,7 +92,8 @@ class AuthController
             ]);
         }
 
-        $tipo = strtolower(trim($usuario['tipo'] ?? 'fs'));
+        $tipo = strtolower(trim($usuario['tipo'] ?? 'pfs'));
+        if ($tipo === 'fs') $tipo = 'pfs'; // compat: BD sin migrar (026)
 
         $_SESSION['usuario'] = [
             'id'        => $usuario['id'],

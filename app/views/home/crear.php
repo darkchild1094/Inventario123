@@ -27,10 +27,23 @@ $usuarioPlazas = $_SESSION['usuario']['plazas'] ?? [];
 
 $esAdmin       = $tipo === 'admin';
 $esCoordinador = $tipo === 'coordinador';
-$esFs          = $tipo === 'fs';
+$esFs          = $tipo === 'pfs';
 $esAti         = $tipo === 'ati';
 $esAdminOrCoordinador = $esAdmin || $esCoordinador;
-$statusDefault = $esCoordinador ? 'en_bodega' : 'asignado';
+
+// Contexto de módulo: si el alta se abre desde un módulo, el estatus queda
+// prefijado (y el JS de secciones condicionales arranca en él).
+$moduloForm  = trim((string) ($_GET['modulo'] ?? ''));
+$tiendaUsoPre = (int) ($_GET['tienda_uso_id'] ?? 0);
+$statusPorModulo = [
+    'tiendas'   => 'en_uso',
+    'bodega'    => 'en_bodega',
+    'mi_stock'  => 'asignado',
+    'stock_pfs' => 'asignado',
+    'ati'       => 'asignado',
+];
+$statusDefault = $statusPorModulo[$moduloForm]
+    ?? ($esCoordinador ? 'en_bodega' : 'asignado');
 
 $mostrarNegocio = !empty($negociosDisponibles) && count($negociosDisponibles) > 1;
 $mostrarPlaza   = !empty($plazasPorNegocio) && count($plazasPorNegocio) > 1;
@@ -51,7 +64,7 @@ $tiendasPlaza = array_values(array_filter($tiendas, fn($t) => (int)$t['plaza_id'
 $bodegasPlaza = array_values(array_filter($bodegas, fn($b) => in_array($plazaId, array_map('intval', array_filter(explode(',', $b['plazas_ids'] ?? ''))), true)));
 
 $usuariosPlaza = array_values(array_filter($usuariosPorPlaza, fn($u) =>
-    in_array($u['tipo'], ['fs', 'ati', 'coordinador'], true)
+    in_array($u['tipo'], ['pfs', 'ati', 'coordinador'], true)
 ));
 
 // Los admin no están atados a una plaza específica (tienen acceso global),
@@ -107,6 +120,9 @@ foreach ($usuarios as $u) {
 
                 <form action="index.php?action=guardar" method="POST" id="formActivo" enctype="multipart/form-data">
                     <input type="hidden" name="stock_destino_default" id="stock_destino_hidden" value="<?= !empty($bodegaPorNegocio['id']) ? 'bodega_' . $bodegaPorNegocio['id'] : (!empty($bodegaOxxo['id']) ? 'bodega_' . $bodegaOxxo['id'] : '') ?>">
+                    <?php if ($moduloForm !== ''): ?>
+                        <input type="hidden" name="modulo" value="<?= htmlspecialchars($moduloForm) ?>">
+                    <?php endif; ?>
                     <?php if ($mostrarNegocio || $mostrarPlaza): ?>
                         <div class="row g-3 mb-3">
                             <?php if ($mostrarNegocio): ?>
@@ -235,7 +251,7 @@ foreach ($usuarios as $u) {
                                     <i class="fas fa-user-circle text-primary fa-lg"></i>
                                     <div>
                                         <div class="fw-bold"><?= htmlspecialchars($usuarioActual['nombre'] ?? '—') ?></div>
-                                        <small class="text-muted text-uppercase">FS · Stock personal</small>
+                                        <small class="text-muted text-uppercase">PFS · Stock personal</small>
                                     </div>
                                 </div>
 
@@ -244,7 +260,7 @@ foreach ($usuarios as $u) {
                                     <option value="">Seleccione usuario...</option>
                                     <?php $listaAsignables = $esAdmin ? $usuarios : $usuariosPlaza; ?>
                                     <?php foreach ($listaAsignables as $u): ?>
-                                        <?php if (in_array($u['tipo'], ['admin', 'fs', 'ati', 'coordinador'])): ?>
+                                        <?php if (in_array($u['tipo'], ['admin', 'pfs', 'ati', 'coordinador'])): ?>
                                             <option value="<?= $u['id'] ?>"
                                                 <?= (int)$u['id'] === $usuarioId ? 'selected' : '' ?>>
                                                 <?= htmlspecialchars($u['nombre']) ?>
@@ -269,7 +285,7 @@ foreach ($usuarios as $u) {
                                     onchange="cargarReemplazos()">
                                 <option value="">Seleccione tienda...</option>
                                 <?php foreach ($tiendasPlaza as $t): ?>
-                                    <option value="<?= $t['id'] ?>"><?= htmlspecialchars($t['nombre']) ?></option>
+                                    <option value="<?= $t['id'] ?>" <?= (int) $t['id'] === $tiendaUsoPre ? 'selected' : '' ?>><?= htmlspecialchars($t['nombre']) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>

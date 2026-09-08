@@ -364,7 +364,7 @@ class SolicitudTrasladoController
     {
         $us = (new Usuario($this->db))->obtenerPorPlaza($plazaId);
         return array_values(array_filter($us, fn($u) =>
-            (int) $u['id'] !== $exceptoId && in_array($u['tipo'] ?? '', ['fs', 'ati', 'coordinador'], true)));
+            (int) $u['id'] !== $exceptoId && in_array($u['tipo'] ?? '', ['pfs', 'ati', 'coordinador'], true)));
     }
 
     private function tiendasOperables(int $plazaId): array

@@ -6,9 +6,12 @@ namespace App\Helpers;
  * Permisos — Matriz de roles para femsa_assets
  *
  * admin       → todo, todas las plazas y negocios
- * coordinador → todo menos gestionar usuarios, solo su plaza
- * fs          → registra/visualiza solo su stock, puede editar su perfil, exportar su stock
+ * coordinador → todo menos gestionar usuarios, solo sus plazas
+ * pfs         → registra/visualiza solo su stock, puede editar su perfil, exportar su stock
  * ati         → registra activos en su stock, visualiza activos de su plaza, exportar excel de su plaza
+ *
+ * El rol de campo se llama 'pfs' (antes 'fs'). La migración 026 renombró el
+ * valor en la BD; aquí ya no debe aparecer 'fs' salvo compatibilidad de login.
  */
 class Permisos
 {
@@ -46,8 +49,11 @@ class Permisos
 
     public static function esAdmin(): bool         { return self::tipo() === 'admin'; }
     public static function esCoordinador(): bool   { return self::tipo() === 'coordinador'; }
-    public static function esFs(): bool            { return self::tipo() === 'fs'; }
+    public static function esPfs(): bool           { return self::tipo() === 'pfs'; }
     public static function esAti(): bool           { return self::tipo() === 'ati'; }
+
+    /** @deprecated usa esPfs(). Se mantiene por si alguna vista vieja lo llama. */
+    public static function esFs(): bool            { return self::esPfs(); }
 
     // ── Permisos específicos ──────────────────────────────────────────────────
 
@@ -63,30 +69,30 @@ class Permisos
         return in_array(self::tipo(), ['admin', 'coordinador'], true);
     }
 
-    /** Puede ver activos de su plaza (coordinador y ati) o solo su stock (fs) */
+    /** Puede ver activos de su plaza (coordinador y ati) o solo su stock (pfs) */
     public static function puedeVerSuPlaza(): bool
     {
         return in_array(self::tipo(), ['admin', 'coordinador', 'ati']);
     }
 
-    /** FS: solo ve su propio stock */
+    /** PFS: solo ve su propio stock */
     public static function soloSuStock(): bool
     {
-        return self::esFs();
+        return self::esPfs();
     }
 
     /** Puede registrar nuevos activos */
     public static function puedeCrearActivo(): bool
     {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati']);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati']);
     }
 
     /** Puede editar activos */
     public static function puedeEditarActivo(): bool
     {
-        // admin, coordinador, fs y ati pueden editar (ati/fs solo lo suyo,
+        // admin, coordinador, pfs y ati pueden editar (ati/pfs solo lo suyo,
         // validado aparte en puedeEditarActivoConcreto)
-        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati']);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati']);
     }
 
     /** Ids de plaza del usuario en sesión (asignadas o, en su defecto, la principal). */
@@ -95,7 +101,7 @@ class Permisos
         return self::plazasIds() ?: array_filter([self::plazaId()]);
     }
 
-    /** Puede editar un activo específico: fs y ati solo pueden editar activos de su stock */
+    /** Puede editar un activo específico: pfs y ati solo pueden editar activos de su stock */
     public static function puedeEditarActivoConcreto(array $activo): bool
     {
         if (self::esAdmin() || self::esCoordinador()) return true;
@@ -103,12 +109,12 @@ class Permisos
         $esSuStockPersonal = ($activo['stock_tipo'] ?? '') === 'usuario'
             && (int) ($activo['usuario_stock_id'] ?? 0) === self::idUsuario();
 
-        // Los activos EN USO viven en el stock de la tienda: fs/ati pueden operarlos
+        // Los activos EN USO viven en el stock de la tienda: pfs/ati pueden operarlos
         // (incluye hacer reemplazos) si la tienda está en su(s) plaza(s).
         $esTiendaDeSuPlaza = ($activo['stock_tipo'] ?? '') === 'tienda'
             && in_array((int) ($activo['plaza_id'] ?? 0), self::misPlazas(), true);
 
-        if (self::esFs() || self::tipo() === 'ati') {
+        if (self::esPfs() || self::tipo() === 'ati') {
             return $esSuStockPersonal || $esTiendaDeSuPlaza;
         }
 
@@ -128,7 +134,7 @@ class Permisos
         if ($tipo === 'ati') {
             return (int) ($activo['plaza_id'] ?? 0) === self::plazaId();
         }
-        if ($tipo === 'fs') {
+        if ($tipo === 'pfs') {
             $esSuStock = ($activo['stock_tipo'] ?? '') === 'usuario'
                 && (int) ($activo['usuario_stock_id'] ?? 0) === self::idUsuario();
             $esTiendaDeSuPlaza = ($activo['stock_tipo'] ?? '') === 'tienda'
@@ -161,15 +167,15 @@ class Permisos
     /** Puede exportar Excel */
     public static function puedeExportar(): bool
     {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati']);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati']);
     }
 
     /**
      * Scope de exportación según la matriz de roles:
      * admin       → todo
-     * coordinador → su plaza
+     * coordinador → sus plazas
      * ati         → su plaza
-     * fs          → su stock personal
+     * pfs         → su stock personal
      */
     public static function filtrosExportar(): array
     {
@@ -177,7 +183,7 @@ class Permisos
             'admin'       => [],
             'coordinador' => ['plaza_id' => self::plazasIds() ?: [self::plazaId()]],
             'ati'         => ['plaza_id' => self::plazaId()],
-            'fs'          => ['stock_usuario_id' => self::idUsuario()],
+            'pfs'         => ['stock_usuario_id' => self::idUsuario()],
             default       => ['plaza_id' => -1],
         };
     }
@@ -191,7 +197,7 @@ class Permisos
     /** Puede ver la pestaña Historial */
     public static function puedeVerHistorial(): bool
     {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati'], true);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
     }
 
     /** Puede gestionar la asignación de ATI por tienda (pantalla "Tiendas") */
@@ -213,7 +219,7 @@ class Permisos
     /** Todos los roles operativos pueden iniciar una solicitud de movimiento. */
     public static function puedeCrearSolicitudTraslado(): bool
     {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati'], true);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
     }
 
     /** Coordinador y ATI aprueban solicitudes (según el destino); admin cualquiera. */
@@ -225,7 +231,7 @@ class Permisos
     /** Ve la pantalla de Traslados: todos los roles operativos. */
     public static function puedeVerTraslados(): bool
     {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'fs', 'ati'], true);
+        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
     }
 
     /** ¿Puede este usuario firmar una solicitud con este `destino`, según su rol? */
@@ -267,7 +273,7 @@ class Permisos
      *   admin       → todo
      *   coordinador → sus plazas asignadas
      *   ati         → su plaza
-     *   fs          → su propio stock personal + todo lo de tiendas (fs_scope)
+     *   pfs         → su propio stock personal + todo lo de tiendas (pfs_scope)
      */
     public static function filtrosHistorial(): array
     {
@@ -275,7 +281,7 @@ class Permisos
             'admin'       => [],
             'coordinador' => ['plaza_id' => self::misPlazas()],
             'ati'         => ['plaza_id' => self::plazaId()],
-            'fs'          => ['fs_scope' => self::idUsuario()],
+            'pfs'         => ['pfs_scope' => self::idUsuario()],
             default       => ['plaza_id' => [-1]],
         };
     }
@@ -295,8 +301,106 @@ class Permisos
             'admin'       => [],                                       // sin restricción
             'coordinador' => ['plaza_id' => self::plazasIds() ?: [$plazaId]], // TODAS sus plazas asignadas
             'ati'         => ['plaza_id' => $plazaId],                  // su única plaza
-            'fs'          => ['stock_usuario_id' => self::idUsuario()], // solo su stock
+            'pfs'         => ['stock_usuario_id' => self::idUsuario()], // solo su stock
             default       => ['plaza_id' => -1],                       // nadie más
+        };
+    }
+
+    // ── Módulos de navegación (fuente única para navbar, API y app Android) ────
+
+    /**
+     * Definición de todos los módulos. `editable` indica si el rol puede hacer
+     * CRUD de activos dentro del módulo (los que no, es solo lectura).
+     * El orden del array es el orden en que se pintan en el menú.
+     */
+    private const MODULOS_POR_ROL = [
+        'coordinador' => [
+            ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
+            ['clave' => 'consulta',  'etiqueta' => 'Consulta',    'icono' => 'fa-barcode',             'editable' => false],
+            ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
+            ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => true],
+            ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
+            ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
+        ],
+        'ati' => [
+            ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
+            ['clave' => 'consulta',  'etiqueta' => 'Consulta',    'icono' => 'fa-barcode',             'editable' => false],
+            ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
+            ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
+            ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => false],
+            ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
+        ],
+        'pfs' => [
+            ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
+            ['clave' => 'consulta',  'etiqueta' => 'Consulta',    'icono' => 'fa-barcode',             'editable' => false],
+            ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
+            ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
+            ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => false],
+        ],
+        'admin' => [
+            ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
+            ['clave' => 'consulta',  'etiqueta' => 'Consulta',    'icono' => 'fa-barcode',             'editable' => false],
+            ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
+            ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => true],
+            ['clave' => 'ati',       'etiqueta' => 'ATI',         'icono' => 'fa-user-gear',           'editable' => true],
+            ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => true],
+            ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
+            ['clave' => 'usuarios',  'etiqueta' => 'Usuarios',    'icono' => 'fa-users-cog',           'editable' => true],
+        ],
+    ];
+
+    /** Módulos visibles para el rol en sesión, en orden de menú. */
+    public static function modulos(): array
+    {
+        return self::MODULOS_POR_ROL[self::tipo()] ?? [];
+    }
+
+    /** ¿El rol en sesión puede ver este módulo? */
+    public static function moduloPermitido(string $modulo): bool
+    {
+        foreach (self::modulos() as $m) {
+            if ($m['clave'] === $modulo) return true;
+        }
+        return false;
+    }
+
+    /** ¿El rol en sesión puede hacer CRUD de activos dentro de este módulo? */
+    public static function moduloEditable(string $modulo): bool
+    {
+        foreach (self::modulos() as $m) {
+            if ($m['clave'] === $modulo) return (bool) $m['editable'];
+        }
+        return false;
+    }
+
+    /**
+     * Scope por plaza para módulos que NO son personales (tiendas, bodega,
+     * stock_pfs, ati): admin ve todo; el resto, solo sus plazas asignadas.
+     * A diferencia de filtrosScope(), a pfs también lo acota por plaza y no
+     * por su stock personal.
+     */
+    private static function scopePlazas(): array
+    {
+        if (self::esAdmin()) return [];
+        $plazas = self::misPlazas();
+        return ['plaza_id' => $plazas ?: [-1]];
+    }
+
+    /**
+     * Filtros de datos de un módulo = scope por plaza del rol + el filtro
+     * propio del módulo. Lo consumen listarActivos y la exportación por módulo.
+     * Devuelve el scope base para módulos que no listan activos (dashboard,
+     * consulta, usuarios).
+     */
+    public static function filtrosModulo(string $modulo): array
+    {
+        return match ($modulo) {
+            'tiendas'   => array_merge(self::scopePlazas(), ['solo_tienda' => true]),
+            'bodega'    => array_merge(self::scopePlazas(), ['solo_bodega' => true]),
+            'mi_stock'  => ['stock_usuario_id' => self::idUsuario()],
+            'stock_pfs' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'pfs']),
+            'ati'       => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'ati']),
+            default     => self::filtrosScope(),
         };
     }
 

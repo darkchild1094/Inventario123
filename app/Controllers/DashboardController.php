@@ -31,7 +31,17 @@ class DashboardController
     {
         $tipo = Permisos::tipo();
 
-        $resumen = (new Activo($this->db))->resumen(Permisos::filtrosScope());
+        $activoModel = new Activo($this->db);
+        $resumen = $activoModel->resumen(Permisos::filtrosScope());
+
+        // Conteo por módulo visible (para las tarjetas).
+        $modulos   = Permisos::modulos();
+        $porModulo = [];
+        foreach ($modulos as $m) {
+            $clave = $m['clave'];
+            if (in_array($clave, ['dashboard', 'consulta', 'usuarios'], true)) continue;
+            $porModulo[$clave] = $activoModel->resumen(Permisos::filtrosModulo($clave))['total'];
+        }
 
         $movs = (new Movimiento($this->db))
             ->listar(Permisos::filtrosHistorial(), 1, 8)['movimientos'] ?? [];

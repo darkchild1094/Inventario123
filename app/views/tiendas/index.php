@@ -9,10 +9,15 @@
 <body>
 <?php include ROOT_PATH . '/app/views/components/navbar.php'; ?>
 
+<?php $puedeAsignarAti = $puedeAsignarAti ?? false; ?>
+
 <div class="container py-4">
-    <h2 class="h3 fw-bold mb-1"><i class="fas fa-store text-primary me-2"></i>Tiendas · ATI responsable</h2>
-    <p class="text-muted">El ATI responsable de una tienda recibe en su stock los activos que pasan a
-        <strong>garantía</strong> o <strong>baja</strong>.</p>
+    <h2 class="h3 fw-bold mb-1"><i class="fas fa-store text-primary me-2"></i>Tiendas</h2>
+    <p class="text-muted">Entra a una tienda para ver y administrar sus activos.
+        <?php if ($puedeAsignarAti): ?>
+            El <strong>ATI responsable</strong> recibe en su stock los activos que pasan a garantía o baja.
+        <?php endif; ?>
+    </p>
 
     <form method="GET" action="index.php" class="row g-2 align-items-end mb-3">
         <input type="hidden" name="controller" value="tienda">
@@ -20,8 +25,9 @@
         <div class="col-md-4">
             <label class="form-label small fw-bold text-muted mb-1">Plaza</label>
             <select name="plaza_id" class="form-select" onchange="this.form.submit()">
+                <option value="0"<?= (int) $plazaId === 0 ? ' selected' : '' ?>><?= \App\Helpers\Permisos::esAdmin() ? 'Todas' : 'Todas mis plazas' ?></option>
                 <?php foreach ($plazas as $p): ?>
-                    <option value="<?= $p['id'] ?>" <?= (int) $p['id'] === $plazaId ? 'selected' : '' ?>>
+                    <option value="<?= $p['id'] ?>" <?= (int) $p['id'] === (int) $plazaId ? 'selected' : '' ?>>
                         <?= htmlspecialchars($p['nombre']) ?>
                     </option>
                 <?php endforeach; ?>
@@ -42,17 +48,30 @@
     <div class="table-responsive">
         <table class="table table-hover align-middle">
             <thead class="table-light">
-                <tr><th>CR</th><th>Tienda</th><th style="width:320px;">ATI responsable</th></tr>
+                <tr>
+                    <th>CR</th><th>Tienda</th><th>Plaza</th>
+                    <th class="text-end">Activos</th>
+                    <?php if ($puedeAsignarAti): ?><th style="width:280px;">ATI responsable</th><?php endif; ?>
+                    <th></th>
+                </tr>
             </thead>
             <tbody>
             <?php if (empty($tiendas)): ?>
-                <tr><td colspan="3" class="text-center text-muted py-4">Sin tiendas para el filtro.</td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-4">Sin tiendas para el filtro.</td></tr>
             <?php else: foreach ($tiendas as $t): ?>
                 <tr>
-                    <td class="text-muted"><?= htmlspecialchars($t['cr_tienda']) ?></td>
-                    <td class="fw-bold"><?= htmlspecialchars($t['nombre']) ?></td>
+                    <td class="text-muted"><?= htmlspecialchars($t['cr_tienda'] ?? '') ?></td>
+                    <td class="fw-bold">
+                        <a href="index.php?modulo=tiendas&tienda_id=<?= (int) $t['id'] ?>" class="text-decoration-none">
+                            <?= htmlspecialchars($t['nombre']) ?>
+                        </a>
+                    </td>
+                    <td class="small text-muted"><?= htmlspecialchars($t['plaza_nombre'] ?? '') ?></td>
+                    <td class="text-end"><span class="badge bg-light text-dark border"><?= number_format((int) ($t['activos_count'] ?? 0)) ?></span></td>
+                    <?php if ($puedeAsignarAti): ?>
                     <td>
-                        <select class="form-select form-select-sm js-ati" data-tienda-id="<?= $t['id'] ?>">
+                        <select class="form-select form-select-sm js-ati" data-tienda-id="<?= $t['id'] ?>"
+                                <?= empty($atis) ? 'disabled' : '' ?>>
                             <option value="">— Sin asignar —</option>
                             <?php foreach ($atis as $a): ?>
                                 <option value="<?= $a['id'] ?>" <?= (int) ($t['ati_usuario_id'] ?? 0) === (int) $a['id'] ? 'selected' : '' ?>>
@@ -60,16 +79,21 @@
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php if (empty($atis)): ?>
+                            <div class="form-text small"><?= htmlspecialchars($t['ati_nombre'] ?? 'Elige una plaza para asignar') ?></div>
+                        <?php endif; ?>
+                    </td>
+                    <?php endif; ?>
+                    <td class="text-end">
+                        <a href="index.php?modulo=tiendas&tienda_id=<?= (int) $t['id'] ?>" class="btn btn-sm btn-outline-primary">
+                            Ver activos <i class="fas fa-arrow-right ms-1"></i>
+                        </a>
                     </td>
                 </tr>
             <?php endforeach; endif; ?>
             </tbody>
         </table>
     </div>
-    <?php if ($plazaId > 0 && empty($atis)): ?>
-        <p class="text-warning small"><i class="fas fa-triangle-exclamation me-1"></i>
-            Esta plaza no tiene usuarios tipo ATI. Crea al menos uno para poder asignarlo.</p>
-    <?php endif; ?>
 </div>
 
 <script>

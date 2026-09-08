@@ -137,8 +137,8 @@ $action         = $_GET['action']     ?? 'index';
 
 // Pantalla principal = dashboard. El listado sigue en 'home' con ?vista=.
 if ($controllerName === 'home' && $action === 'index'
-    && !isset($_GET['vista']) && !isset($_GET['dispositivo_id'])
-    && !isset($_GET['status']) && !isset($_GET['busqueda'])
+    && !isset($_GET['vista']) && !isset($_GET['modulo']) && !isset($_GET['dispositivo_id'])
+    && !isset($_GET['status']) && !isset($_GET['busqueda']) && !isset($_GET['tienda_id'])
     && !isset($_GET['pagina']) && !isset($_GET['negocio_id']) && !isset($_GET['plaza_id'])) {
     $controllerName = 'dashboard';
 }
@@ -208,6 +208,10 @@ switch ($controllerName) {
 
     case 'dashboard':
         $controller = new \App\Controllers\DashboardController($db);
+        break;
+
+    case 'consulta':
+        $controller = new \App\Controllers\ConsultaController($db);
         break;
 
     default:

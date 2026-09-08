@@ -45,7 +45,7 @@
                         $tipoClases = [
                             'admin'       => 'bg-danger',
                             'coordinador' => 'bg-warning text-dark',
-                            'fs'          => 'bg-primary',
+                            'pfs'         => 'bg-primary',
                             'ati'         => 'bg-info text-dark',
                         ];
                         $tipoClase = $tipoClases[$u['tipo']] ?? 'bg-secondary';

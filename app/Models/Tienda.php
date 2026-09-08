@@ -48,6 +48,49 @@ class Tienda
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Lista de tiendas para el módulo "Tiendas": nombre, CR, ATI responsable y
+     * el número de activos que hoy viven en el stock de la tienda.
+     * $plazaIds vacío = todas (admin). $busqueda filtra por nombre o CR.
+     */
+    public function listarConConteo(array $plazaIds = [], ?string $busqueda = null): array
+    {
+        $where  = '1=1';
+        $params = [];
+
+        $plazaIds = array_values(array_filter(array_map('intval', $plazaIds)));
+        if ($plazaIds) {
+            $ph = [];
+            foreach ($plazaIds as $i => $pid) { $ph[] = ":p{$i}"; $params[":p{$i}"] = $pid; }
+            $where .= ' AND t.plaza_id IN (' . implode(',', $ph) . ')';
+        }
+        if ($busqueda !== null && trim($busqueda) !== '') {
+            $where .= ' AND (t.nombre LIKE :b1 OR t.cr_tienda LIKE :b2)';
+            $params[':b1'] = '%' . trim($busqueda) . '%';
+            $params[':b2'] = '%' . trim($busqueda) . '%';
+        }
+
+        $sql = "SELECT t.id, t.cr_tienda, t.nombre, t.plaza_id, t.ati_usuario_id,
+                       p.nombre AS plaza_nombre,
+                       r.nombre AS region_nombre,
+                       n.nombre AS negocio_nombre,
+                       ua.nombre AS ati_nombre,
+                       (SELECT COUNT(*) FROM activo a
+                          JOIN stock s ON s.id = a.stock_id
+                         WHERE s.tipo = 'tienda' AND s.tienda_id = t.id) AS activos_count
+                FROM {$this->table} t
+                LEFT JOIN plaza   p ON t.plaza_id   = p.id
+                LEFT JOIN region  r ON p.region_id  = r.id
+                LEFT JOIN negocio n ON r.negocio_id = n.id
+                LEFT JOIN usuario ua ON ua.id = t.ati_usuario_id
+                WHERE {$where}
+                ORDER BY t.nombre";
+
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function obtenerPorId(int $id): array|false
     {
         $stmt = $this->conn->prepare(

@@ -4,6 +4,8 @@ use App\Models\Movimiento;
 $nombre  = $_SESSION['usuario']['nombre'] ?? 'Usuario';
 $plaza   = $_SESSION['usuario']['plaza_nombre'] ?? '';
 $vistaBase = in_array($tipo, ['admin', 'coordinador'], true) ? 'todos' : 'mi_stock';
+$modulos   = $modulos   ?? \App\Helpers\Permisos::modulos();
+$porModulo = $porModulo ?? [];
 
 $kpis = [
     ['k' => 'total',     'lbl' => 'Total activos', 'ico' => 'fa-box-open',        'cls' => 'dark',    'val' => $resumen['total']],
@@ -57,11 +59,39 @@ $maxPlaza  = max(1, ...array_map(fn($d) => $d['n'], $resumen['por_plaza'] ?: [['
                 <?= $plaza !== '' ? ' · ' . htmlspecialchars($plaza) : '' ?>
             </div>
         </div>
-        <?php if (in_array($tipo, ['admin', 'coordinador', 'fs', 'ati'], true)): ?>
-            <a href="index.php?action=crear" class="btn btn-primary">
-                <i class="fas fa-plus me-1"></i> Nuevo activo
-            </a>
-        <?php endif; ?>
+        <a href="index.php?controller=consulta&action=index" class="btn btn-outline-primary">
+            <i class="fas fa-barcode me-1"></i> Consulta
+        </a>
+    </div>
+
+    <!-- Módulos -->
+    <div class="row g-3 mb-4">
+        <?php foreach ($modulos as $m):
+            $clave = $m['clave'];
+            if ($clave === 'dashboard') continue;
+            if ($clave === 'consulta') { $href = 'index.php?controller=consulta&action=index'; }
+            elseif ($clave === 'usuarios') { $href = 'index.php?controller=usuario&action=index'; }
+            else { $href = 'index.php?modulo=' . urlencode($clave); }
+            $cnt = $porModulo[$clave] ?? null;
+        ?>
+            <div class="col-6 col-md-4 col-xl-3">
+                <a href="<?= $href ?>" class="text-decoration-none">
+                    <div class="card card-soft h-100">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <i class="fas <?= htmlspecialchars($m['icono']) ?> fa-lg text-primary"></i>
+                            <div>
+                                <div class="fw-bold text-body"><?= htmlspecialchars($m['etiqueta']) ?></div>
+                                <?php if ($cnt !== null): ?>
+                                    <div class="text-muted small"><?= number_format((int) $cnt) ?> activos</div>
+                                <?php elseif (!$m['editable']): ?>
+                                    <div class="text-muted small">Consultar</div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        <?php endforeach; ?>
     </div>
 
     <!-- KPIs -->
