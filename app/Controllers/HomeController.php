@@ -416,6 +416,124 @@ class HomeController
         }
     }
 
+    // ── Movimiento en tienda: formulario simple (GET) ─────────────────────────
+    public function movTienda(): void
+    {
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
+        if (!Permisos::moduloPermitido('tiendas')) $this->redirigir('index.php?controller=dashboard');
+
+        $tiendaId = (int) ($_GET['tienda_uso_id'] ?? $_GET['tienda_id'] ?? 0);
+        $tiendaFija = $tiendaId > 0 ? (new Tienda($this->db))->obtenerPorId($tiendaId) : null;
+
+        // Tiendas y dispositivos/modelos para los selects.
+        $misPlazas = Permisos::esAdmin() ? [] : Permisos::misPlazas();
+        $tiendas = (new Tienda($this->db))->obtenerTodas();
+        if ($misPlazas) {
+            $tiendas = array_values(array_filter($tiendas, fn($t) => in_array((int) $t['plaza_id'], $misPlazas, true)));
+        }
+        $dispositivos = (new Dispositivo($this->db))->leerTodos();
+        $modelos      = (new Modelo($this->db))->obtenerTodos();
+
+        $navActivo = 'tiendas';
+        require ROOT_PATH . '/app/views/home/mov_tienda.php';
+    }
+
+    // ── Movimiento en tienda (Instalación / Retiro / Reemplazo) ────────────────
+    // Formulario simple del módulo Tiendas. Branchea y reusa ActivoGuardado.
+    public function movimientoTienda(): void
+    {
+        Permisos::requerir(['admin', 'coordinador', 'pfs', 'ati']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') $this->redirigir('index.php');
+
+        $modo     = $_POST['modo'] ?? 'instalacion';
+        $tiendaId = (int) ($_POST['tienda_uso_id'] ?? 0);
+        $serie    = trim((string) ($_POST['serie'] ?? ''));
+        $cb       = trim((string) ($_POST['codigo_barras'] ?? '')) ?: null;
+        $motivo   = trim((string) ($_POST['motivo'] ?? ''));
+        $actorId  = Permisos::idUsuario();
+        $volver   = 'index.php?modulo=tiendas' . ($tiendaId > 0 ? '&tienda_id=' . $tiendaId : '');
+
+        $tienda = $tiendaId > 0 ? (new Tienda($this->db))->obtenerPorId($tiendaId) : null;
+        if (!$tienda) { $_SESSION['error'] = 'Tienda inválida.'; $this->redirigir($volver); }
+        if (!Permisos::esAdmin() && !in_array((int) $tienda['plaza_id'], Permisos::misPlazas(), true)) {
+            $_SESSION['error'] = 'Esa tienda no pertenece a tu plaza.'; $this->redirigir($volver);
+        }
+
+        $activoModel = new Activo($this->db);
+        $porIdent = fn(string $q) => ($activoModel->obtenerTodosFiltrado(['identificador_exacto' => $q], 1, 5)['activos'] ?? []);
+        $svc  = new ActivoGuardado($this->db);
+        $actor = $this->actorSesion();
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
+
+        if ($modo === 'retiro') {
+            $cand = null;
+            foreach (array_merge($porIdent($serie), $cb ? $porIdent($cb) : []) as $a) {
+                if (($a['stock_tipo'] ?? '') === 'tienda' && (int) ($a['tienda_stock_id'] ?? 0) === $tiendaId
+                    && ($a['status'] ?? '') === 'en_uso') { $cand = $a; break; }
+            }
+            if (!$cand) { $_SESSION['error'] = 'Esa serie no está instalada en esta tienda.'; $this->redirigir($volver); }
+            $antes = $activoModel->obtenerPorId((int) $cand['id']);
+            $datos = [
+                'serie' => $antes['serie'], 'codigo_barras' => $antes['codigo_barras'], 'num_activo' => $antes['num_activo'],
+                'modelo_id' => $antes['modelo_id'], 'status' => 'asignado', 'procedencia_tienda_id' => $tiendaId,
+                'tienda_uso_id' => null,
+            ];
+            $post = array_merge($_POST, ['asignado_usuario_id' => $actorId, 'plaza_id' => (int) $antes['plaza_id'], 'motivo' => $motivo]);
+            $res  = $svc->actualizar((int) $cand['id'], $datos, $antes, $post, $actor);
+            $_SESSION[$res['ok'] ? 'success' : 'error'] = $res['ok'] ? 'Equipo retirado a tu stock.' : ($res['error'] ?? 'No se pudo retirar.');
+            $this->redirigir($volver);
+        }
+
+        // Instalación: si la serie ya está en MI stock personal → mover ese activo.
+        if ($modo === 'instalacion') {
+            $mio = null;
+            foreach ($porIdent($serie) as $a) {
+                if (($a['stock_tipo'] ?? '') === 'usuario' && (int) ($a['usuario_stock_id'] ?? 0) === $actorId) { $mio = $a; break; }
+            }
+            if ($mio) {
+                $antes = $activoModel->obtenerPorId((int) $mio['id']);
+                $datos = [
+                    'serie' => $antes['serie'], 'codigo_barras' => $antes['codigo_barras'], 'num_activo' => $antes['num_activo'],
+                    'modelo_id' => $antes['modelo_id'], 'status' => 'en_uso', 'procedencia_tienda_id' => $antes['procedencia_tienda_id'],
+                    'tienda_uso_id' => $tiendaId,
+                ];
+                $post = array_merge($_POST, ['plaza_id' => (int) $tienda['plaza_id'], 'motivo' => $motivo]);
+                $res  = $svc->actualizar((int) $mio['id'], $datos, $antes, $post, $actor);
+                $_SESSION[$res['ok'] ? 'success' : 'error'] = $res['ok'] ? 'Equipo de tu stock instalado en la tienda.' : ($res['error'] ?? 'No se pudo instalar.');
+                $this->redirigir($volver);
+            }
+        }
+
+        // Instalación de equipo nuevo, o Reemplazo: alta 'en_uso' vía ActivoGuardado::crear.
+        $datos = array_merge([
+            'serie' => $serie, 'codigo_barras' => $cb, 'num_activo' => trim((string) ($_POST['num_activo'] ?? '')) ?: null,
+            'modelo_id' => !empty($_POST['modelo_id']) ? (int) $_POST['modelo_id'] : null,
+            'status' => 'en_uso', 'procedencia_tienda_id' => !empty($_POST['procedencia_tienda_id']) ? (int) $_POST['procedencia_tienda_id'] : null,
+            'tienda_uso_id' => $tiendaId,
+        ], $fotos);
+        $post = array_merge($_POST, ['plaza_id' => (int) $tienda['plaza_id'], 'motivo' => $motivo, 'tienda_uso_id' => $tiendaId]);
+
+        if ($modo === 'reemplazo') {
+            $saleSerie = trim((string) ($_POST['salida_serie'] ?? ''));
+            $saleCb    = trim((string) ($_POST['salida_codigo_barras'] ?? ''));
+            $sale = null;
+            foreach (array_merge($saleSerie ? $porIdent($saleSerie) : [], $saleCb ? $porIdent($saleCb) : []) as $a) {
+                if (($a['stock_tipo'] ?? '') === 'tienda' && (int) ($a['tienda_stock_id'] ?? 0) === $tiendaId
+                    && ($a['status'] ?? '') === 'en_uso') { $sale = $a; break; }
+            }
+            if (!$sale) { $_SESSION['error'] = 'El equipo que sale no está instalado en esta tienda.'; $this->redirigir($volver); }
+            $post['reemplaza_activo_id']  = (int) $sale['id'];
+            $post['salida_destino']       = 'asignado';
+            $post['salida_usuario_id']    = $actorId;
+        }
+
+        $res = $svc->crear($datos, $post, $actor);
+        $_SESSION[$res['ok'] ? 'success' : 'error'] = $res['ok']
+            ? ($modo === 'reemplazo' ? 'Reemplazo registrado; el equipo saliente pasó a tu stock.' : 'Equipo instalado en la tienda.')
+            : ($res['error'] ?? 'No se pudo registrar el movimiento.');
+        $this->redirigir($volver);
+    }
+
     // ── Detalle (modal, sin recargar la página) ─────────────────────────────────
 
     public function detalle(): void

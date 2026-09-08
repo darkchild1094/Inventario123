@@ -186,6 +186,19 @@ foreach ($usuarios as $u) {
                             </select>
                         </div>
 
+                        <?php
+                        // Módulos compactos: el estatus queda fijo y el <select> se oculta.
+                        $moduloCompacto = in_array($moduloForm, ['bodega', 'mi_stock', 'stock_pfs', 'ati'], true);
+                        $etiquetaEstatus = ['bodega' => 'En bodega', 'mi_stock' => 'A mi stock',
+                            'stock_pfs' => 'Stock de ingeniero (PFS)', 'ati' => 'Stock de ATI'][$moduloForm] ?? '';
+                        ?>
+                        <?php if ($moduloCompacto): ?>
+                        <input type="hidden" name="status" id="estatus" value="<?= htmlspecialchars($statusDefault) ?>">
+                        <div class="col-md-4">
+                            <label class="form-label">Destino</label>
+                            <input type="text" class="form-control" value="<?= htmlspecialchars($etiquetaEstatus) ?>" disabled>
+                        </div>
+                        <?php else: ?>
                         <div class="col-md-4">
                             <label class="form-label">Estatus <span class="text-danger">*</span></label>
                             <select name="status" id="estatus" class="form-select" required
@@ -214,6 +227,7 @@ foreach ($usuarios as $u) {
 
                             </select>
                         </div>
+                        <?php endif; ?>
 
                         <div class="col-md-4">
                             <label class="form-label text-primary">Serie <span class="text-danger">*</span></label>
@@ -669,6 +683,17 @@ document.addEventListener('keydown', e => {
 document.addEventListener('DOMContentLoaded', () => {
     cargarAtis();
     manejarEstatus();
+
+    // Módulos compactos: en "mi_stock" el activo va a mi propio stock -> ocultar
+    // el selector "Asignado a" y fijarlo a mí.
+    const moduloForm = <?= json_encode($moduloForm) ?>;
+    const miId = <?= (int) $usuarioId ?>;
+    if (moduloForm === 'mi_stock') {
+        const c = document.getElementById('campo_asignado');
+        const s = document.getElementById('select_asignado');
+        if (s) { s.value = miId; s.removeAttribute('required'); }
+        if (c) c.style.display = 'none';
+    }
     const disp = document.getElementById('dispositivo');
     if (disp) disp.addEventListener('change', () => setTimeout(cargarReemplazos, 300));
     const serie = document.getElementById('campo_serie');

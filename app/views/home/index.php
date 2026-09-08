@@ -47,8 +47,13 @@
         <?php if ($moduloActual !== ''): ?>
             <div class="d-flex gap-2">
                 <?php if (\App\Helpers\Permisos::moduloEditable($moduloActual)): ?>
-                    <a href="index.php?action=crear&modulo=<?= urlencode($moduloActual) ?><?= !empty($filtros['tienda_id']) ? '&tienda_uso_id=' . (int) $filtros['tienda_id'] : '' ?>"
-                       class="btn btn-primary"><i class="fas fa-plus me-1"></i> Nuevo</a>
+                    <?php if ($moduloActual === 'tiendas'): ?>
+                        <a href="index.php?action=movTienda<?= !empty($filtros['tienda_id']) ? '&tienda_uso_id=' . (int) $filtros['tienda_id'] : '' ?>"
+                           class="btn btn-primary"><i class="fas fa-plus me-1"></i> Movimiento</a>
+                    <?php else: ?>
+                        <a href="index.php?action=crear&modulo=<?= urlencode($moduloActual) ?>"
+                           class="btn btn-primary"><i class="fas fa-plus me-1"></i> Nuevo</a>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if (\App\Helpers\Permisos::puedeExportar()): ?>
                     <a href="index.php?controller=export&action=modulo&modulo=<?= urlencode($moduloActual) ?><?= !empty($filtros['tienda_id']) ? '&tienda_id=' . (int) $filtros['tienda_id'] : '' ?>"

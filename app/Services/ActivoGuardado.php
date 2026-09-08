@@ -142,12 +142,18 @@ class ActivoGuardado
             //    bodega (en_bodega) requiere una Solicitud de movimiento firmada
             //    — para TODOS los roles, incluido admin. Excepciones:
             //    instalar/mover a tienda ('en_uso'), reasignar al MISMO
-            //    ingeniero, y quedarse igual.
+            //    ingeniero, RETIRAR de una tienda a TU PROPIO stock, y quedarse igual.
             $stAntes = $antes['status'] ?? '';
             if (in_array($stAntes, ['asignado', 'en_uso', 'en_bodega'], true) && $status !== $stAntes && $status !== 'en_uso') {
+                $actorIdChk = (int) ($actor['id'] ?? 0);
                 $mismoDueno = $status === 'asignado' && $stAntes === 'asignado'
                     && (int) ($post['asignado_usuario_id'] ?? 0) === (int) ($antes['usuario_stock_id'] ?? 0);
-                if (!$mismoDueno && in_array($status, ['asignado', 'en_bodega', 'baja', 'garantia'], true)) {
+                // Retiro directo: sacar de una tienda ('en_uso') hacia el stock
+                // personal del propio usuario que lo retira. No cambia de custodia
+                // a un tercero, así que no exige Solicitud firmada.
+                $retiroAMiStock = $status === 'asignado' && $stAntes === 'en_uso'
+                    && (int) ($post['asignado_usuario_id'] ?? 0) === $actorIdChk;
+                if (!$mismoDueno && !$retiroAMiStock && in_array($status, ['asignado', 'en_bodega', 'baja', 'garantia'], true)) {
                     $lbl = [
                         'en_bodega' => 'devolver equipo a bodega',
                         'asignado'  => 'traspasar equipo a otro ingeniero',

@@ -256,6 +256,59 @@ class ApiController
         $this->json($activo);
     }
 
+    // GET ?action=resolverSerie&serie=<q>[&tienda_id=X]
+    // Ayuda al formulario "Movimiento en tienda": dada una serie/código exacto,
+    // dice si el activo ya está en el stock personal del usuario (instalación =
+    // mover ese) o instalado en la tienda indicada (retiro). Alcance global.
+    public function resolverSerie(): void
+    {
+        $q = trim((string) ($_GET['serie'] ?? $_GET['q'] ?? ''));
+        if ($q === '') {
+            $this->json(['success' => false, 'message' => 'Falta la serie o código.'], 400);
+        }
+        $tiendaId = (int) ($_GET['tienda_id'] ?? 0);
+
+        $filas = (new Activo($this->db))
+            ->obtenerTodosFiltrado(['identificador_exacto' => $q], 1, 10)['activos'] ?? [];
+
+        if (!$filas) {
+            $this->json(['encontrado' => false, 'activo' => null, 'en_mi_stock' => false, 'en_esta_tienda' => false]);
+        }
+
+        if (count($filas) > 1) {
+            $this->json([
+                'encontrado'    => true,
+                'activo'        => null,
+                'en_mi_stock'   => false,
+                'en_esta_tienda'=> false,
+                'coincidencias' => array_map(fn($a) => [
+                    'id' => (int) $a['id'], 'serie' => $a['serie'] ?? null,
+                    'codigo_barras' => $a['codigo_barras'] ?? null,
+                    'modelo_nombre' => $a['modelo_nombre'] ?? null,
+                    'status' => $a['status'] ?? null,
+                    'ubicacion_corta' => $this->ubicacionCorta($a),
+                ], $filas),
+            ]);
+        }
+
+        $a  = $filas[0];
+        $yo = Permisos::idUsuario();
+        $enMiStock = ($a['stock_tipo'] ?? '') === 'usuario'
+            && (int) ($a['usuario_stock_id'] ?? 0) === $yo;
+        $enEstaTienda = $tiendaId > 0
+            && ($a['stock_tipo'] ?? '') === 'tienda'
+            && (int) ($a['tienda_stock_id'] ?? 0) === $tiendaId
+            && ($a['status'] ?? '') === 'en_uso';
+
+        $this->json([
+            'encontrado'     => true,
+            'activo'         => $a,
+            'en_mi_stock'    => $enMiStock,
+            'en_esta_tienda' => $enEstaTienda,
+            'ubicacion_corta'=> $this->ubicacionCorta($a),
+        ]);
+    }
+
     // GET ?action=consultar&q=<serie|codigo_barras|num_activo>
     // Módulo "Consulta": identifica un equipo y devuelve dónde está y su
     // historial. Alcance GLOBAL (cualquier usuario autenticado, sólo lectura):
