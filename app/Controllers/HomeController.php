@@ -295,12 +295,15 @@ class HomeController
             }
         }
 
-        // Imágenes
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
+        // Imágenes (foto_equipo_salida = foto del equipo retirado en un reemplazo)
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, [], ['foto_equipo_salida']);
+        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
+        unset($fotos['foto_equipo_salida']);
         $datos = array_merge($datos, $fotos);
 
         // Toda la resolución de stock + bitácora + reemplazo vive en el servicio.
         $post = array_merge($_POST, ['plaza_id' => $plazaId]);
+        if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         $res  = (new ActivoGuardado($this->db))->crear($datos, $post, $this->actorSesion());
 
         $_SESSION[$res['ok'] ? 'success' : 'error'] = $res['ok']
@@ -399,12 +402,15 @@ class HomeController
         $datos = $this->datosDesdePost();
 
         // Imágenes: solo se sobrescriben las que realmente se subieron.
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: []);
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: [], ['foto_equipo_salida']);
+        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
+        unset($fotos['foto_equipo_salida']);
         foreach ($fotos as $key => $val) {
             if ($val !== null) $datos[$key] = $val;
         }
 
         $post = array_merge($_POST, ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())]);
+        if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         $res  = (new ActivoGuardado($this->db))->actualizar($id, $datos, $antes, $post, $this->actorSesion());
 
         if ($res['ok']) {
@@ -463,7 +469,9 @@ class HomeController
         $porIdent = fn(string $q) => ($activoModel->obtenerTodosFiltrado(['identificador_exacto' => $q], 1, 5)['activos'] ?? []);
         $svc  = new ActivoGuardado($this->db);
         $actor = $this->actorSesion();
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, [], ['foto_equipo_salida']);
+        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
+        unset($fotos['foto_equipo_salida']);
 
         if ($modo === 'retiro') {
             $cand = null;
@@ -525,6 +533,7 @@ class HomeController
             $post['reemplaza_activo_id']  = (int) $sale['id'];
             $post['salida_destino']       = 'asignado';
             $post['salida_usuario_id']    = $actorId;
+            if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         }
 
         $res = $svc->crear($datos, $post, $actor);

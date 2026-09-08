@@ -178,7 +178,7 @@ class MovimientoService
         $codigoSale = array_key_exists('codigo_barras', $destino)
                         ? (trim((string) $destino['codigo_barras']) ?: null) : $sale['codigo_barras'];
 
-        $this->activo->actualizar([
+        $datosSale = [
             'id'                    => $saleId,
             'serie'                 => $serieSale,
             'codigo_barras'         => $codigoSale,
@@ -188,7 +188,12 @@ class MovimientoService
             'procedencia_tienda_id' => $tiendaId ?: null,
             'tienda_uso_id'         => null,
             'stock_id'              => $stockSaleId,
-        ]);
+        ];
+        // Foto del equipo retirado, si el formulario la envió.
+        if (!empty($destino['foto_equipo'])) {
+            $datosSale['foto_equipo'] = (string) $destino['foto_equipo'];
+        }
+        $this->activo->actualizar($datosSale);
 
         $saleDespues = $this->activo->obtenerPorId($saleId);
         $this->mov->registrar([

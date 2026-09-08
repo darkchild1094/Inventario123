@@ -254,6 +254,10 @@ class ActivoGuardado
         if (array_key_exists('salida_codigo_barras', $post)) {
             $destino['codigo_barras'] = (string) $post['salida_codigo_barras'];
         }
+        // Foto del equipo que sale (ya procesada por el controlador → nombre de archivo).
+        if (!empty($post['salida_foto_equipo'])) {
+            $destino['foto_equipo'] = (string) $post['salida_foto_equipo'];
+        }
         $this->mov->ejecutarReemplazo($entra, $reemplazaId, $destino, $actorId, $motivo);
     }
 

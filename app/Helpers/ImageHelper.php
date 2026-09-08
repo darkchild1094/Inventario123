@@ -61,9 +61,10 @@ class ImageHelper
     public static function procesarYSubirImagenes(
         string $rutaBase,
         ?int   $activoId  = null,
-        array  $fotosViejas = []
+        array  $fotosViejas = [],
+        array  $camposExtra = []
     ): array {
-        $campos    = ['foto_equipo', 'foto_serie', 'foto_activo'];
+        $campos    = array_merge(['foto_equipo', 'foto_serie', 'foto_activo'], $camposExtra);
         $resultado = [];
 
         foreach ($campos as $campo) {

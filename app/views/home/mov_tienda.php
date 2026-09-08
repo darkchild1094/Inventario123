@@ -98,8 +98,13 @@
             <label class="form-label mt-3">Razón / motivo</label>
             <input type="text" name="motivo" class="form-control mb-3" maxlength="255" placeholder="Ej. Falla de hardware, instalación programada...">
 
-            <label class="form-label">Foto del equipo</label>
+            <label class="form-label" id="lblFotoEquipo">Foto del equipo</label>
             <input type="file" name="foto_equipo" accept="image/*" capture="environment" class="form-control mb-3">
+
+            <div id="bloqueFotoSalida" class="oculto">
+                <label class="form-label">Foto del equipo retirado</label>
+                <input type="file" name="foto_equipo_salida" accept="image/*" capture="environment" class="form-control mb-3">
+            </div>
 
             <div class="d-flex gap-2">
                 <a href="index.php?modulo=tiendas<?= $tiendaFija ? '&tienda_id=' . (int) $tiendaFija['id'] : '' ?>" class="btn btn-outline-secondary">Cancelar</a>
@@ -131,9 +136,13 @@
         if (modSel.selectedOptions[0] && modSel.selectedOptions[0].hidden) modSel.value = '';
     });
 
+    const fotoSalida = document.getElementById('bloqueFotoSalida');
+    const lblFoto = document.getElementById('lblFotoEquipo');
     function pintarModo() {
         const m = modo();
         salida.classList.toggle('oculto', m !== 'reemplazo');
+        fotoSalida.classList.toggle('oculto', m !== 'reemplazo');
+        lblFoto.textContent = m === 'reemplazo' ? 'Foto del equipo instalado' : 'Foto del equipo';
         // en instalación mostramos "alta nueva" solo si la serie no está en tu stock (lo decide el lookup)
         if (m !== 'instalacion' && m !== 'reemplazo') nuevo.classList.add('oculto');
         hint.textContent = '';

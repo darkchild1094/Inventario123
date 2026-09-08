@@ -423,10 +423,13 @@ class ApiController
             $this->json(['success' => false, 'message' => 'Debes indicar una plaza válida.'], 400);
         }
 
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, []);
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, [], ['foto_equipo_salida']);
+        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
+        unset($fotos['foto_equipo_salida']);
         $datos = array_merge($datos, $fotos);
 
         $post = array_merge($_POST, ['plaza_id' => $plazaId]);
+        if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         $res  = (new ActivoGuardado($this->db))->crear($datos, $post, $this->actorSesion());
 
         if ($res['ok']) {
@@ -453,12 +456,15 @@ class ApiController
 
         $datos = $this->datosActivoPost();
 
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: []);
+        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: [], ['foto_equipo_salida']);
+        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
+        unset($fotos['foto_equipo_salida']);
         foreach ($fotos as $key => $val) {
             if ($val !== null) $datos[$key] = $val;
         }
 
         $post  = array_merge($_POST, ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())]);
+        if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         $res   = (new ActivoGuardado($this->db))->actualizar($id, $datos, $antes, $post, $this->actorSesion());
 
         if ($res['ok']) {
