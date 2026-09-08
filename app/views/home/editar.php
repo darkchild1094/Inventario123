@@ -178,6 +178,7 @@ if ($stockTipo === 'usuario') {
                         <div class="col-md-4">
                             <label class="form-label">Código de barras</label>
                             <input type="text" name="codigo_barras" class="form-control"
+                                   inputmode="numeric" pattern="\d{8}" maxlength="8" title="8 dígitos numéricos"
                                    value="<?= htmlspecialchars($activo['codigo_barras'] ?? '') ?>">
                         </div>
 
@@ -326,7 +327,8 @@ if ($stockTipo === 'usuario') {
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small mb-1">Código de barras del equipo que sale</label>
-                                        <input type="text" name="salida_codigo_barras" id="salida_codigo_barras" class="form-control form-control-sm">
+                                        <input type="text" name="salida_codigo_barras" id="salida_codigo_barras" class="form-control form-control-sm"
+                                               inputmode="numeric" pattern="\d{8}" maxlength="8" title="8 dígitos numéricos">
                                     </div>
                                 </div>
                             </div>
@@ -400,10 +402,13 @@ if ($stockTipo === 'usuario') {
                         <div class="col-12">
                             <label class="form-label">
                                 <i class="fas fa-pen-to-square me-1"></i> Motivo del movimiento
-                                <span class="text-muted fw-normal small">(Opcional)</span>
                             </label>
-                            <textarea name="motivo" class="form-control" rows="2" maxlength="255"
-                                      placeholder="Ej.: retiro por proyecto Verkada, garantía por falla de lente, reubicación…"></textarea>
+                            <select name="motivo" class="form-select">
+                                <option value="">—</option>
+                                <?php foreach (['Renovación tecnológica','Daño','Garantía','Alta','Baja','Traspaso'] as $mot): ?>
+                                    <option value="<?= htmlspecialchars($mot) ?>"><?= htmlspecialchars($mot) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                             <small class="text-muted">Se guarda en el historial junto con este movimiento.</small>
                         </div>
 

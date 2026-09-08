@@ -53,7 +53,8 @@
                 </div>
                 <div class="col-4">
                     <label class="form-label">Código de barras</label>
-                    <input type="text" name="codigo_barras" class="form-control" autocomplete="off">
+                    <input type="text" name="codigo_barras" class="form-control" autocomplete="off"
+                           inputmode="numeric" pattern="\d{8}" maxlength="8" title="8 dígitos numéricos">
                 </div>
             </div>
             <div id="hintSerie" class="form-text mb-2"></div>
@@ -91,12 +92,18 @@
                 </div>
                 <div class="col-4">
                     <label class="form-label">CB del que sale</label>
-                    <input type="text" name="salida_codigo_barras" class="form-control" autocomplete="off">
+                    <input type="text" name="salida_codigo_barras" class="form-control" autocomplete="off"
+                           inputmode="numeric" pattern="\d{8}" maxlength="8" title="8 dígitos numéricos">
                 </div>
             </div>
 
-            <label class="form-label mt-3">Razón / motivo</label>
-            <input type="text" name="motivo" class="form-control mb-3" maxlength="255" placeholder="Ej. Falla de hardware, instalación programada...">
+            <label class="form-label mt-3">Motivo</label>
+            <select name="motivo" class="form-select mb-3">
+                <option value="">—</option>
+                <?php foreach (['Renovación tecnológica','Daño','Garantía','Alta','Baja','Traspaso'] as $mot): ?>
+                    <option value="<?= htmlspecialchars($mot) ?>"><?= htmlspecialchars($mot) ?></option>
+                <?php endforeach; ?>
+            </select>
 
             <label class="form-label" id="lblFotoEquipo">Foto del equipo</label>
             <input type="file" name="foto_equipo" accept="image/*" capture="environment" class="form-control mb-3">

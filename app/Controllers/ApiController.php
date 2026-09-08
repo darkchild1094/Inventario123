@@ -697,6 +697,84 @@ class ApiController
         ]);
     }
 
+    // GET ?action=obtenerHintsEscaner
+    // Pistas para el lector de series, derivadas de las series ya registradas:
+    // por dispositivo, los prefijos frecuentes (para filtrar/priorizar como el
+    // "3S,SM" de los UPS) y si conviene modo OCR. Para código de barras, la
+    // regla global: 8 dígitos numéricos. Se cachea en el cliente.
+    public function obtenerHintsEscaner(): void
+    {
+        // Total de series alfabéticas por dispositivo.
+        $tot = [];
+        $st = $this->db->query(
+            "SELECT m.dispositivo_id d, COUNT(*) n
+             FROM activo a JOIN modelo m ON m.id = a.modelo_id
+             WHERE a.serie REGEXP '^[A-Za-z]' AND CHAR_LENGTH(a.serie) >= 5
+             GROUP BY m.dispositivo_id"
+        );
+        foreach ($st as $r) { $tot[(int) $r['d']] = (int) $r['n']; }
+
+        // Prefijos de 3 caracteres con al menos 30 apariciones.
+        $porDisp = [];
+        $st = $this->db->query(
+            "SELECT m.dispositivo_id d, UPPER(LEFT(a.serie,3)) pref, COUNT(*) n
+             FROM activo a JOIN modelo m ON m.id = a.modelo_id
+             WHERE a.serie REGEXP '^[A-Za-z]' AND CHAR_LENGTH(a.serie) >= 5
+             GROUP BY m.dispositivo_id, pref
+             HAVING n >= 30"
+        );
+        foreach ($st as $r) {
+            $porDisp[(int) $r['d']][] = ['pref' => $r['pref'], 'n' => (int) $r['n']];
+        }
+
+        $nombres = [];
+        foreach ((new Dispositivo($this->db))->leerTodos() as $d) {
+            $nombres[(int) $d['id']] = mb_strtoupper($d['nombre'] ?? '');
+        }
+
+        $hints = [];
+        foreach ($nombres as $id => $nom) {
+            $prefijos = [];
+            $alpha    = $tot[$id] ?? 0;
+            if ($alpha > 0 && !empty($porDisp[$id])) {
+                usort($porDisp[$id], fn($a, $b) => $b['n'] <=> $a['n']);
+                $acum = 0;
+                foreach (array_slice($porDisp[$id], 0, 5) as $p) {
+                    if ($p['n'] / $alpha >= 0.10) { $prefijos[] = $p['pref']; $acum += $p['n']; }
+                }
+                // Sólo se filtra por prefijo si cubren buena parte de las series.
+                if ($acum / $alpha < 0.35) $prefijos = [];
+            }
+
+            // Overrides manuales que la distribución de series no captura bien:
+            // el UPS trae un código diminuto que empieza con 3S/SM y necesita zoom;
+            // el regulador no trae código útil → OCR tras "SERIE:".
+            $zoomAlto = false;
+            $modoOcr  = false;
+            if (str_contains($nom, 'UPS')) {
+                $prefijos = array_values(array_unique(array_merge(['3S', 'SM'], $prefijos)));
+                $zoomAlto = true;
+            }
+            if (str_contains($nom, 'REGULADOR') && !str_contains($nom, 'UPS')) {
+                $modoOcr = true;
+            }
+
+            $hints[(string) $id] = [
+                'serie' => [
+                    'prefijos'  => $prefijos,
+                    'modo_ocr'  => $modoOcr,
+                    'zoom_alto' => $zoomAlto,
+                ],
+                'codigo_barras' => ['longitud' => 8, 'solo_digitos' => true],
+            ];
+        }
+
+        $this->json([
+            'por_dispositivo'    => $hints,
+            'codigo_barras_regla' => ['longitud' => 8, 'solo_digitos' => true],
+        ]);
+    }
+
     // GET ?action=obtenerModelosPorDispositivo&dispositivo_id=X
     public function obtenerModelosPorDispositivo(): void
     {
