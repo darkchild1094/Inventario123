@@ -1446,6 +1446,15 @@ class ApiController
         $this->json(array_values($out));
     }
 
+    // GET ?action=stockPfsUsuarios — landing del módulo "Stock PFS": lista de
+    // ingenieros PFS que tienen 1 o más activos registrados a su nombre.
+    public function stockPfsUsuarios(): void
+    {
+        if (!Permisos::moduloPermitido('stock_pfs')) { $this->json([]); return; }
+        $plazas = Permisos::esAdmin() ? null : Permisos::misPlazas();
+        $this->json((new Usuario($this->db))->obtenerPfsConStock($plazas));
+    }
+
     // GET ?action=inventarioStockListar&stock_usuario_id= — histórico (por mes).
     public function inventarioStockListar(): void
     {

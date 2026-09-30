@@ -74,6 +74,39 @@ class Usuario
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * PFS con 1+ activos registrados a su nombre (cualquier plaza donde
+     * tengan stock), con el conteo — landing del módulo "Stock PFS".
+     * $plazaIds null = sin restricción (admin); [] = ninguna.
+     */
+    public function obtenerPfsConStock(?array $plazaIds = null): array
+    {
+        $where  = "u.tipo = 'pfs'";
+        $params = [];
+        if ($plazaIds !== null) {
+            if (empty($plazaIds)) return [];
+            $marcadores = implode(',', array_fill(0, count($plazaIds), '?'));
+            $where .= " AND s.plaza_id IN ($marcadores)";
+            $params = array_map('intval', $plazaIds);
+        }
+
+        $stmt = $this->conn->prepare(
+            "SELECT u.id, u.nombre, u.email, u.foto, u.plaza_id, u.tipo,
+                    p.nombre AS plaza_nombre,
+                    COUNT(a.id) AS activos_count
+             FROM {$this->tabla} u
+             LEFT JOIN plaza p ON u.plaza_id = p.id
+             JOIN stock s ON s.tipo = 'usuario' AND s.usuario_id = u.id
+             JOIN activo a ON a.stock_id = s.id
+             WHERE {$where}
+             GROUP BY u.id
+             HAVING activos_count >= 1
+             ORDER BY u.nombre"
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function obtenerPlazas(int $usuarioId): array
     {
         $stmt = $this->conn->prepare(
