@@ -249,12 +249,17 @@ class ActivoGuardado
             'asignado_usuario_id' => (int) ($post['salida_usuario_id'] ?? 0),
             'ati_usuario_id'      => (int) ($post['salida_ati_usuario_id'] ?? 0),
         ];
-        // Corrección opcional de serie / código de barras del activo que sale.
+        // Corrección opcional de serie / código de barras / N° de activo del
+        // que sale (num_activo no se muestra en la app, pero sí se exporta
+        // en el Excel de RENTEC).
         if (array_key_exists('salida_serie', $post)) {
             $destino['serie'] = (string) $post['salida_serie'];
         }
         if (array_key_exists('salida_codigo_barras', $post)) {
             $destino['codigo_barras'] = (string) $post['salida_codigo_barras'];
+        }
+        if (array_key_exists('salida_num_activo', $post)) {
+            $destino['num_activo'] = (string) $post['salida_num_activo'];
         }
         // Foto del equipo que sale (ya procesada por el controlador → nombre de archivo).
         if (!empty($post['salida_foto_equipo'])) {

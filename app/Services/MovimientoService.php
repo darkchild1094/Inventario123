@@ -173,18 +173,21 @@ class MovimientoService
         $stockSale = $res['stock'];
         $stockSaleId = $stockSale ? (int) $stockSale['id'] : (int) $sale['stock_id'];
 
-        // El usuario puede corregir la serie / código de barras del activo que
-        // sale desde el mismo formulario de reemplazo.
+        // El usuario puede corregir la serie / código de barras / N° de activo
+        // del activo que sale desde el mismo formulario de reemplazo (p.ej. al
+        // elegirlo de una lista, o tecleado a mano si no aparece en ella).
         $serieSale  = array_key_exists('serie', $destino) && trim((string) $destino['serie']) !== ''
                         ? trim((string) $destino['serie']) : $sale['serie'];
         $codigoSale = array_key_exists('codigo_barras', $destino)
                         ? (trim((string) $destino['codigo_barras']) ?: null) : $sale['codigo_barras'];
+        $numActivoSale = array_key_exists('num_activo', $destino) && trim((string) $destino['num_activo']) !== ''
+                        ? trim((string) $destino['num_activo']) : $sale['num_activo'];
 
         $datosSale = [
             'id'                    => $saleId,
             'serie'                 => $serieSale,
             'codigo_barras'         => $codigoSale,
-            'num_activo'            => $sale['num_activo'],
+            'num_activo'            => $numActivoSale,
             'modelo_id'             => $sale['modelo_id'],
             'status'                => $statusSale,
             'procedencia_tienda_id' => $tiendaId ?: null,

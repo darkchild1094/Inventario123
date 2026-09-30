@@ -224,15 +224,19 @@ class ExportController
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('TODO');
 
-        $headers = ['CR', 'TIENDA', 'Descripción', 'Cantidad', 'PFS', '', 'PLACA', 'SERIE'];
+        $headers = ['CR', 'TIENDA', 'Descripción', 'Cantidad', 'PFS', '', 'PLACA', 'SERIE', 'N° Activo Retirado'];
         foreach ($headers as $i => $h) {
             $sheet->setCellValue([$i + 1, 1], $h);
         }
         $sheet->getStyle('A1:H1')->getFont()->setBold(true);
-        $anchos = ['A' => 10, 'B' => 28, 'C' => 32, 'D' => 10, 'E' => 14, 'F' => 4, 'G' => 12, 'H' => 16];
+        $anchos = ['A' => 10, 'B' => 28, 'C' => 32, 'D' => 10, 'E' => 14, 'F' => 4, 'G' => 12, 'H' => 16, 'I' => 18];
         foreach ($anchos as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
+        // Columna I: N° de activo del equipo retirado. No se muestra en la
+        // app (solo sirve para conciliar el registro de Activo Fijo) -- se
+        // deja en la hoja pero oculta por default.
+        $sheet->getColumnDimension('I')->setVisible(false);
 
         $fila = 2;
         foreach ($detalle['detalle_instalados'] ?? [] as $row) {
@@ -243,11 +247,12 @@ class ExportController
             $sheet->setCellValue("E{$fila}", $this->claveUsuario($row));
             $sheet->setCellValue("G{$fila}", $row['codigo_entra'] ?? '');
             $sheet->setCellValue("H{$fila}", $row['serie_entra'] ?? '');
+            $sheet->setCellValue("I{$fila}", $row['num_activo_sale'] ?? '');
             $fila++;
         }
         $ultima = $fila - 1;
         if ($ultima >= 2) {
-            $sheet->getStyle("A2:H{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+            $sheet->getStyle("A2:I{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
             $sheet->getStyle("D2:D{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         }
 
