@@ -16,6 +16,7 @@ use App\Models\Stock;
 use App\Models\Area;
 use App\Models\Movimiento;
 use App\Models\SolicitudTraslado;
+use App\Models\InventarioBodega;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
 use App\Services\TrasladoService;
@@ -1280,6 +1281,155 @@ class ApiController
             'status'           => 'asignado',
         ], 1, 1000);
         return $res['activos'] ?? [];
+    }
+
+    // ── Inventario físico de bodega (auditoría por escaneo) ────────────────────
+
+    // GET ?action=inventarioBodegaBodegas — bodegas donde el usuario puede hacer inventario.
+    public function inventarioBodegaBodegas(): void
+    {
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) { $this->json([]); }
+        if (Permisos::esAdmin()) {
+            $this->json((new Bodega($this->db))->obtenerTodas());
+        }
+        $out = [];
+        foreach (Permisos::misPlazas() as $pid) {
+            foreach ($this->bodegasDePlazaApi((int) $pid) as $b) $out[(int) $b['id']] = $b;
+        }
+        $this->json(array_values($out));
+    }
+
+    // GET ?action=inventarioBodegaListar&bodega_id= — histórico de inventarios (por mes) de una bodega.
+    public function inventarioBodegaListar(): void
+    {
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) { $this->json([]); }
+        $bodegaId = (int) ($_GET['bodega_id'] ?? 0);
+        if ($bodegaId <= 0 || !$this->puedeOperarBodega($bodegaId)) { $this->json([]); }
+        $this->json((new InventarioBodega($this->db))->listar($bodegaId));
+    }
+
+    // POST ?action=inventarioBodegaIniciar  bodega_id= — abre (o retoma) el inventario del mes en curso.
+    public function inventarioBodegaIniciar(): void
+    {
+        $this->requerirPost();
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $bodegaId = (int) ($b['bodega_id'] ?? 0);
+        if ($bodegaId <= 0 || !$this->puedeOperarBodega($bodegaId)) {
+            $this->json(['success' => false, 'message' => 'Bodega inválida.'], 400);
+        }
+
+        $model = new InventarioBodega($this->db);
+        $abierto = $model->obtenerAbierto($bodegaId);
+        if ($abierto) {
+            $this->json(['success' => true, 'inventario' => $model->obtenerDetalle((int) $abierto['id'])]);
+        }
+
+        $activos = (new Activo($this->db))->obtenerTodosFiltrado(
+            ['bodega_id' => $bodegaId, 'status' => 'en_bodega'], 1, 5000
+        )['activos'] ?? [];
+        $activoIds = array_map(fn($a) => (int) $a['id'], $activos);
+
+        $id = $model->crear($bodegaId, date('Y-m'), Permisos::idUsuario(), $activoIds);
+        $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
+    }
+
+    // GET ?action=inventarioBodegaDetalle&id=
+    public function inventarioBodegaDetalle(): void
+    {
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) { $this->json(['error' => 'forbidden'], 403); }
+        $id = (int) ($_GET['id'] ?? 0);
+        $model = new InventarioBodega($this->db);
+        $inv = $model->obtenerCabecera($id);
+        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) { $this->json(['error' => 'not_found'], 404); }
+        $this->json($model->obtenerDetalle($id));
+    }
+
+    // POST ?action=inventarioBodegaEscanear  inventario_id=  codigo=
+    public function inventarioBodegaEscanear(): void
+    {
+        $this->requerirPost();
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $inventarioId = (int) ($b['inventario_id'] ?? 0);
+        $codigo = trim((string) ($b['codigo'] ?? ''));
+        if ($inventarioId <= 0 || $codigo === '') {
+            $this->json(['success' => false, 'message' => 'Faltan datos.'], 400);
+        }
+
+        $model = new InventarioBodega($this->db);
+        $inv = $model->obtenerCabecera($inventarioId);
+        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) {
+            $this->json(['success' => false, 'message' => 'Inventario no encontrado.'], 404);
+        }
+        if ($inv['estado'] !== 'abierto') {
+            $this->json(['success' => false, 'message' => 'Este inventario ya está cerrado.'], 409);
+        }
+
+        $activoId = $model->marcarEscaneado($inventarioId, $codigo, Permisos::idUsuario());
+        if ($activoId === null) {
+            $this->json(['success' => false, 'message' => 'Ese activo no pertenece a la lista de este inventario.'], 404);
+        }
+        $this->json(['success' => true, 'activo_id' => $activoId, 'inventario' => $model->obtenerDetalle($inventarioId)]);
+    }
+
+    // POST ?action=inventarioBodegaNota  detalle_id=  nota=
+    public function inventarioBodegaNota(): void
+    {
+        $this->requerirPost();
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $detalleId = (int) ($b['detalle_id'] ?? 0);
+        $nota = trim((string) ($b['nota'] ?? ''));
+
+        $model = new InventarioBodega($this->db);
+        $det = $model->obtenerDetalleRow($detalleId);
+        if (!$det) { $this->json(['success' => false, 'message' => 'No encontrado.'], 404); }
+        $inv = $model->obtenerCabecera((int) $det['inventario_id']);
+        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        $model->guardarNota($detalleId, $nota);
+        $this->json(['success' => true]);
+    }
+
+    // POST ?action=inventarioBodegaCerrar  id=
+    public function inventarioBodegaCerrar(): void
+    {
+        $this->requerirPost();
+        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+
+        $model = new InventarioBodega($this->db);
+        $inv = $model->obtenerCabecera($id);
+        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        if ($inv['estado'] !== 'abierto') {
+            $this->json(['success' => false, 'message' => 'Ya está cerrado.'], 409);
+        }
+        $model->cerrar($id);
+        $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
+    }
+
+    /** ¿El usuario en sesión puede operar (ver/escanear) esta bodega? */
+    private function puedeOperarBodega(int $bodegaId): bool
+    {
+        if (Permisos::esAdmin()) return true;
+        foreach (Permisos::misPlazas() as $pid) {
+            $ids = array_map('intval', array_column($this->bodegasDePlazaApi((int) $pid), 'id'));
+            if (in_array($bodegaId, $ids, true)) return true;
+        }
+        return false;
     }
 
     private function bodegasDePlazaApi(int $plazaId): array
