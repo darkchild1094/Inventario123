@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Models\Activo;
 use App\Models\Movimiento;
+use App\Models\ProyectoRentec;
 use App\Helpers\Permisos;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -196,6 +197,69 @@ class ExportController
 
         $etiqueta = preg_replace('/[^A-Za-z0-9_]+/', '', ucfirst($modulo));
         $this->descargarExcel($spreadsheet, "Inventario_{$etiqueta}_" . date('Y-m-d_H-i') . '.xlsx');
+    }
+
+    /**
+     * Export de un proyecto RENTEC: una sola hoja plana (CR, TIENDA,
+     * Descripción, Cantidad, PFS, —, PLACA, SERIE), calcada del registro de
+     * Activo Fijo real que ya usa el usuario — sin plantilla base, se genera
+     * desde cero (más simple que mantener un .xlsx con logos para un layout
+     * de una sola pestaña).
+     */
+    public function rentec(): void
+    {
+        $this->verificarPermisos();
+        $id = (int) ($_GET['id'] ?? 0);
+        $model = new ProyectoRentec($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeVerRentec($cab, $model)) {
+            $_SESSION['error'] = 'Proyecto no encontrado.';
+            header('Location: index.php?controller=dashboard');
+            exit;
+        }
+
+        $detalle = $model->obtenerDetalle($id);
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('TODO');
+
+        $headers = ['CR', 'TIENDA', 'Descripción', 'Cantidad', 'PFS', '', 'PLACA', 'SERIE'];
+        foreach ($headers as $i => $h) {
+            $sheet->setCellValue([$i + 1, 1], $h);
+        }
+        $sheet->getStyle('A1:H1')->getFont()->setBold(true);
+        $anchos = ['A' => 10, 'B' => 28, 'C' => 32, 'D' => 10, 'E' => 14, 'F' => 4, 'G' => 12, 'H' => 16];
+        foreach ($anchos as $col => $w) {
+            $sheet->getColumnDimension($col)->setWidth($w);
+        }
+
+        $fila = 2;
+        foreach ($detalle['instalados'] ?? [] as $row) {
+            $sheet->setCellValue("A{$fila}", $row['cr_tienda'] ?? '');
+            $sheet->setCellValue("B{$fila}", $row['tienda_nombre'] ?? '');
+            $sheet->setCellValue("C{$fila}", trim(($row['dispositivo_nombre'] ?? '') . ' ' . ($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
+            $sheet->setCellValue("D{$fila}", 1);
+            $sheet->setCellValue("E{$fila}", $this->claveUsuario($row));
+            $sheet->setCellValue("G{$fila}", $row['codigo_entra'] ?? '');
+            $sheet->setCellValue("H{$fila}", $row['serie_entra'] ?? '');
+            $fila++;
+        }
+        $ultima = $fila - 1;
+        if ($ultima >= 2) {
+            $sheet->getStyle("A2:H{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+            $sheet->getStyle("D2:D{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        }
+
+        $folio = preg_replace('/[^A-Za-z0-9_-]+/', '', $cab['folio'] ?? "id{$id}");
+        $this->descargarExcel($spreadsheet, "RENTEC_{$folio}_" . date('Y-m-d_H-i') . '.xlsx');
+    }
+
+    private function puedeVerRentec(array $cabecera, ProyectoRentec $model): bool
+    {
+        if (Permisos::esAdmin()) return true;
+        if ((int) $cabecera['usuario_id'] === Permisos::idUsuario()) return true;
+        return $model->tocaPlazas((int) $cabecera['id'], Permisos::misPlazas());
     }
 
     // ── Privados ──────────────────────────────────────────────────────────────

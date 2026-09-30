@@ -127,7 +127,7 @@ class ProyectoRentec
         $cab['recibidos'] = $recibidos->fetchAll(PDO::FETCH_ASSOC);
 
         $instalados = $this->conn->prepare(
-            "SELECT m.id AS movimiento_id, m.evento, m.creado_en, m.tienda_id, t.nombre AS tienda_nombre,
+            "SELECT m.id AS movimiento_id, m.evento, m.creado_en, m.tienda_id, t.nombre AS tienda_nombre, t.cr_tienda AS cr_tienda,
                     m.activo_id, m.activo_relacionado_id, m.usuario_id, u.nombre AS usuario_nombre,
                     a.serie AS serie_entra, a.codigo_barras AS codigo_entra,
                     mo.nombre AS modelo_nombre, mar.nombre AS marca_nombre, di.nombre AS dispositivo_nombre,
