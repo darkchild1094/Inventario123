@@ -96,6 +96,7 @@ class MovimientoService
             'plaza_id'              => $despues['plaza_id'] ?? ($antes['plaza_id'] ?? null),
             'activo_relacionado_id' => $opts['activo_relacionado_id'] ?? null,
             'grupo_id'              => $opts['grupo_id'] ?? null,
+            'proyecto_rentec_id'    => $opts['proyecto_rentec_id'] ?? null,
             'usuario_id'            => $actorId ?: null,
             'nota'                  => self::nota($opts['motivo'] ?? null, $opts['nota'] ?? null),
             'datos_json'            => self::snapshot($despues),
@@ -132,7 +133,7 @@ class MovimientoService
      * @param int   $actorId
      * @param ?string $motivo  motivo del movimiento escrito por el usuario
      */
-    public function ejecutarReemplazo(array $entra, int $saleId, array $destino, int $actorId, ?string $motivo = null): void
+    public function ejecutarReemplazo(array $entra, int $saleId, array $destino, int $actorId, ?string $motivo = null, ?int $proyectoRentecId = null): void
     {
         $grupo    = Movimiento::nuevoGrupoId();
         $tiendaId = (int) ($entra['tienda_uso_id'] ?? 0);
@@ -153,6 +154,7 @@ class MovimientoService
             'plaza_id'              => $plazaId ?: null,
             'activo_relacionado_id' => $saleId,
             'grupo_id'              => $grupo,
+            'proyecto_rentec_id'    => $proyectoRentecId,
             'usuario_id'            => $actorId ?: null,
             'nota'                  => self::nota($motivo, 'Sustituye a la serie ' . ($sale['serie'] ?? '—') . '.'),
             'datos_json'            => self::snapshot($entra) + ['relacionado' => self::snapshot($sale)],
@@ -207,6 +209,7 @@ class MovimientoService
             'plaza_id'              => $plazaId ?: null,
             'activo_relacionado_id' => (int) $entra['id'],
             'grupo_id'              => $grupo,
+            'proyecto_rentec_id'    => $proyectoRentecId,
             'usuario_id'            => $actorId ?: null,
             'nota'                  => self::nota($motivo, trim('Reemplazado por la serie ' . ($entra['serie'] ?? '—') . '. ' . ($res['nota'] ?? ''))),
             'datos_json'            => self::snapshot($saleDespues ?: $sale) + ['relacionado' => self::snapshot($entra)],

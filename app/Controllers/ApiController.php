@@ -17,6 +17,7 @@ use App\Models\Area;
 use App\Models\Movimiento;
 use App\Models\SolicitudTraslado;
 use App\Models\InventarioBodega;
+use App\Models\ProyectoRentec;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
 use App\Services\TrasladoService;
@@ -306,6 +307,11 @@ class ApiController
             'activo'         => $a,
             'en_mi_stock'    => $enMiStock,
             'en_esta_tienda' => $enEstaTienda,
+            // Para RENTEC: si ya fue dado de alta en bodega, la fase de
+            // instalación debe MOVERLO (actualizar) en vez de darlo de alta
+            // otra vez (evita duplicar el activo).
+            'en_bodega'          => ($a['status'] ?? '') === 'en_bodega',
+            'proyecto_rentec_id' => isset($a['proyecto_rentec_id']) ? (int) $a['proyecto_rentec_id'] : null,
             'ubicacion_corta'=> $this->ubicacionCorta($a),
         ]);
     }
@@ -1432,6 +1438,65 @@ class ApiController
         return false;
     }
 
+    // ── RENTEC: proyectos de Renovación Tecnológica ─────────────────────────
+    // Reutiliza el alta normal (status=en_bodega) y el modo Reemplazo de
+    // Tiendas — ambos ya aceptan `proyecto_rentec_id` opcional (ver
+    // datosActivoPost/ActivoGuardado/MovimientoService). Aquí solo viven el
+    // CRUD del proyecto/folio y su listado/detalle.
+
+    // GET ?action=rentecListar — visible para cualquier rol: lo que creó, o
+    // cualquier proyecto que ya haya tocado una de sus plazas.
+    public function rentecListar(): void
+    {
+        $plazas = Permisos::esAdmin() ? null : Permisos::misPlazas();
+        $this->json((new ProyectoRentec($this->db))->listar($plazas, Permisos::idUsuario()));
+    }
+
+    // POST ?action=rentecCrear  nombre= — folio autogenerado (RENTEC-0001…).
+    public function rentecCrear(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $nombre = trim((string) ($b['nombre'] ?? ''));
+        if ($nombre === '') {
+            $this->json(['success' => false, 'message' => 'Dale un nombre al proyecto.'], 400);
+        }
+        $creado = (new ProyectoRentec($this->db))->crear($nombre, Permisos::idUsuario());
+        $this->json(['success' => true, 'id' => $creado['id'], 'folio' => $creado['folio']]);
+    }
+
+    // GET ?action=rentecDetalle&id=
+    public function rentecDetalle(): void
+    {
+        $id = (int) ($_GET['id'] ?? 0);
+        $model = new ProyectoRentec($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeVerRentec($cab, $model)) { $this->json(['error' => 'not_found'], 404); }
+        $this->json($model->obtenerDetalle($id));
+    }
+
+    // POST ?action=rentecCerrar  id= — solo etiqueta el proyecto como cerrado
+    // (no bloquea nada: los activos siguen su ciclo de vida normal).
+    public function rentecCerrar(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        $model = new ProyectoRentec($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeVerRentec($cab, $model)) { $this->json(['success' => false, 'message' => 'No encontrado.'], 404); }
+        $model->cerrar($id);
+        $this->json(['success' => true, 'proyecto' => $model->obtenerCabecera($id)]);
+    }
+
+    private function puedeVerRentec(array $cabecera, ProyectoRentec $model): bool
+    {
+        if (Permisos::esAdmin()) return true;
+        if ((int) $cabecera['usuario_id'] === Permisos::idUsuario()) return true;
+        return $model->tocaPlazas((int) $cabecera['id'], Permisos::misPlazas());
+    }
+
+
     private function bodegasDePlazaApi(int $plazaId): array
     {
         $bModel = new Bodega($this->db);
@@ -1655,6 +1720,7 @@ class ApiController
             'status'                => Activo::normalizarStatus($_POST['status'] ?? 'en_bodega'),
             'procedencia_tienda_id' => !empty($_POST['procedencia_tienda_id']) ? (int) $_POST['procedencia_tienda_id'] : null,
             'tienda_uso_id'         => !empty($_POST['tienda_uso_id'])         ? (int) $_POST['tienda_uso_id']         : null,
+            'proyecto_rentec_id'    => !empty($_POST['proyecto_rentec_id'])    ? (int) $_POST['proyecto_rentec_id']    : null,
         ];
     }
 

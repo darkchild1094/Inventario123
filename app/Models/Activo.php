@@ -50,6 +50,7 @@ class Activo
         $solo_bodega      = $filtros['solo_bodega']      ?? false;
         $solo_tienda      = $filtros['solo_tienda']      ?? false;
         $bodega_id        = $filtros['bodega_id']        ?? null;
+        $proyecto_rentec_id   = $filtros['proyecto_rentec_id']   ?? null;
         $stock_usuario_tipo   = $filtros['stock_usuario_tipo']   ?? null;
         $identificador_exacto = $filtros['identificador_exacto'] ?? null;
 
@@ -133,6 +134,10 @@ class Activo
         if ($bodega_id) {
             $sqlBase .= " AND s.tipo = 'bodega' AND s.bodega_id = :bodega_id";
             $params[':bodega_id'] = (int) $bodega_id;
+        }
+        if ($proyecto_rentec_id) {
+            $sqlBase .= ' AND a.proyecto_rentec_id = :proyecto_rentec_id';
+            $params[':proyecto_rentec_id'] = (int) $proyecto_rentec_id;
         }
         if ($stock_usuario_tipo) {
             $tipos = array_values(array_filter(array_map(
@@ -357,6 +362,13 @@ class Activo
             $params[':idempotency_key'] = substr((string) $datos['idempotency_key'], 0, 64);
         }
 
+        // Proyecto RENTEC (renovación tecnológica) del que entra este equipo, si aplica.
+        if (!empty($datos['proyecto_rentec_id'])) {
+            $campos[]              = 'proyecto_rentec_id';
+            $placeholders[]        = ':proyecto_rentec_id';
+            $params[':proyecto_rentec_id'] = (int) $datos['proyecto_rentec_id'];
+        }
+
         $sql = "INSERT INTO {$this->table} (" . implode(', ', $campos) . ") VALUES (" . implode(', ', $placeholders) . ")";
 
         try {
@@ -398,6 +410,11 @@ class Activo
                 $campos[] = "{$foto} = :{$foto}";
                 $params[":{$foto}"] = $datos[$foto];
             }
+        }
+
+        if (!empty($datos['proyecto_rentec_id'])) {
+            $campos[] = 'proyecto_rentec_id = :proyecto_rentec_id';
+            $params[':proyecto_rentec_id'] = (int) $datos['proyecto_rentec_id'];
         }
 
         $sql = "UPDATE {$this->table} SET " . implode(', ', $campos) . " WHERE id = :id";

@@ -61,9 +61,10 @@ class ActivoGuardado
 
             $motivo = trim((string) ($post['motivo'] ?? '')) ?: null;
             $this->mov->registrarGuardado(null, $despues, (int) $actor['id'], [
-                'tienda_id' => $prep['ctx']['tienda_id'] ?? null,
-                'nota'      => $prep['nota'],
-                'motivo'    => $motivo,
+                'tienda_id'          => $prep['ctx']['tienda_id'] ?? null,
+                'nota'               => $prep['nota'],
+                'motivo'             => $motivo,
+                'proyecto_rentec_id' => $this->proyectoRentecId($post),
             ]);
 
             $this->procesarReemplazo($despues, $datos['status'], $post, (int) $actor['id']);
@@ -101,9 +102,10 @@ class ActivoGuardado
 
             $motivo = trim((string) ($post['motivo'] ?? '')) ?: null;
             $this->mov->registrarGuardado($antes, $despues, (int) $actor['id'], [
-                'tienda_id' => $prep['ctx']['tienda_id'] ?? null,
-                'nota'      => $prep['nota'],
-                'motivo'    => $motivo,
+                'tienda_id'          => $prep['ctx']['tienda_id'] ?? null,
+                'nota'               => $prep['nota'],
+                'motivo'             => $motivo,
+                'proyecto_rentec_id' => $this->proyectoRentecId($post),
             ]);
 
             $this->procesarReemplazo($despues, $datos['status'], $post, (int) $actor['id']);
@@ -258,7 +260,12 @@ class ActivoGuardado
         if (!empty($post['salida_foto_equipo'])) {
             $destino['foto_equipo'] = (string) $post['salida_foto_equipo'];
         }
-        $this->mov->ejecutarReemplazo($entra, $reemplazaId, $destino, $actorId, $motivo);
+        $this->mov->ejecutarReemplazo($entra, $reemplazaId, $destino, $actorId, $motivo, $this->proyectoRentecId($post));
+    }
+
+    private function proyectoRentecId(array $post): ?int
+    {
+        return !empty($post['proyecto_rentec_id']) ? (int) $post['proyecto_rentec_id'] : null;
     }
 
     private function err(string $msg): array
