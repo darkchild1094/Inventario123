@@ -41,6 +41,75 @@ class InventarioBodega
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
+    // ── Variantes por stock personal (Mi Stock / Stock PFS) — mismo mecanismo,
+    // objetivo distinto (stock_usuario_id en vez de bodega_id). Métodos
+    // separados a propósito: no tocar los de bodega_id de arriba. ──────────
+
+    /** Histórico de inventarios del stock personal de un usuario. */
+    public function listarUsuario(int $stockUsuarioId): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT ib.id, ib.stock_usuario_id, ib.periodo, ib.estado,
+                    ib.total_esperado, ib.total_encontrado,
+                    ib.creado_en, ib.cerrado_en,
+                    u.nombre AS usuario_nombre
+             FROM inventario_bodega ib
+             LEFT JOIN usuario u ON u.id = ib.usuario_id
+             WHERE ib.stock_usuario_id = :stock_usuario_id
+             ORDER BY ib.periodo DESC"
+        );
+        $stmt->bindParam(':stock_usuario_id', $stockUsuarioId, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function obtenerAbiertoUsuario(int $stockUsuarioId): array|false
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT * FROM inventario_bodega WHERE stock_usuario_id = :stock_usuario_id AND estado = 'abierto' LIMIT 1"
+        );
+        $stmt->bindParam(':stock_usuario_id', $stockUsuarioId, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    /** Abre un inventario del stock personal de un usuario (mismo snapshot que crear(), objetivo distinto). */
+    public function crearUsuario(int $stockUsuarioId, string $periodo, int $usuarioId, array $activoIds): int
+    {
+        $this->conn->beginTransaction();
+        try {
+            $stmt = $this->conn->prepare(
+                "INSERT INTO inventario_bodega (stock_usuario_id, periodo, usuario_id, total_esperado)
+                 VALUES (:stock_usuario_id, :periodo, :usuario_id, :total_esperado)"
+            );
+            $stmt->execute([
+                ':stock_usuario_id' => $stockUsuarioId,
+                ':periodo'          => $periodo,
+                ':usuario_id'       => $usuarioId,
+                ':total_esperado'   => count($activoIds),
+            ]);
+            $id = (int) $this->conn->lastInsertId();
+
+            if ($activoIds) {
+                $valores = [];
+                $params  = [];
+                foreach ($activoIds as $i => $activoId) {
+                    $valores[] = "(:inv{$i}, :act{$i})";
+                    $params[":inv{$i}"] = $id;
+                    $params[":act{$i}"] = $activoId;
+                }
+                $sql = "INSERT INTO inventario_bodega_detalle (inventario_id, activo_id) VALUES " . implode(',', $valores);
+                $this->conn->prepare($sql)->execute($params);
+            }
+
+            $this->conn->commit();
+            return $id;
+        } catch (\Throwable $e) {
+            $this->conn->rollBack();
+            throw $e;
+        }
+    }
+
     public function obtenerCabecera(int $id): array|false
     {
         $stmt = $this->conn->prepare("SELECT * FROM inventario_bodega WHERE id = :id LIMIT 1");

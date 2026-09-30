@@ -1342,14 +1342,14 @@ class ApiController
         $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
     }
 
-    // GET ?action=inventarioBodegaDetalle&id=
+    // GET ?action=inventarioBodegaDetalle&id= — sirve tanto inventario de
+    // bodega como de stock personal (puedeOperarInventario() distingue).
     public function inventarioBodegaDetalle(): void
     {
-        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) { $this->json(['error' => 'forbidden'], 403); }
         $id = (int) ($_GET['id'] ?? 0);
         $model = new InventarioBodega($this->db);
         $inv = $model->obtenerCabecera($id);
-        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) { $this->json(['error' => 'not_found'], 404); }
+        if (!$inv || !$this->puedeOperarInventario($inv)) { $this->json(['error' => 'not_found'], 404); }
         $this->json($model->obtenerDetalle($id));
     }
 
@@ -1357,9 +1357,6 @@ class ApiController
     public function inventarioBodegaEscanear(): void
     {
         $this->requerirPost();
-        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
-            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
-        }
         $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $inventarioId = (int) ($b['inventario_id'] ?? 0);
         $codigo = trim((string) ($b['codigo'] ?? ''));
@@ -1369,7 +1366,7 @@ class ApiController
 
         $model = new InventarioBodega($this->db);
         $inv = $model->obtenerCabecera($inventarioId);
-        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) {
+        if (!$inv || !$this->puedeOperarInventario($inv)) {
             $this->json(['success' => false, 'message' => 'Inventario no encontrado.'], 404);
         }
         if ($inv['estado'] !== 'abierto') {
@@ -1387,9 +1384,6 @@ class ApiController
     public function inventarioBodegaNota(): void
     {
         $this->requerirPost();
-        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
-            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
-        }
         $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $detalleId = (int) ($b['detalle_id'] ?? 0);
         $nota = trim((string) ($b['nota'] ?? ''));
@@ -1398,7 +1392,7 @@ class ApiController
         $det = $model->obtenerDetalleRow($detalleId);
         if (!$det) { $this->json(['success' => false, 'message' => 'No encontrado.'], 404); }
         $inv = $model->obtenerCabecera((int) $det['inventario_id']);
-        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) {
+        if (!$inv || !$this->puedeOperarInventario($inv)) {
             $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
         }
         $model->guardarNota($detalleId, $nota);
@@ -1409,21 +1403,79 @@ class ApiController
     public function inventarioBodegaCerrar(): void
     {
         $this->requerirPost();
-        if (!in_array(Permisos::tipo(), ['coordinador', 'admin'], true)) {
-            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
-        }
         $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $id = (int) ($b['id'] ?? 0);
 
         $model = new InventarioBodega($this->db);
         $inv = $model->obtenerCabecera($id);
-        if (!$inv || !$this->puedeOperarBodega((int) $inv['bodega_id'])) {
+        if (!$inv || !$this->puedeOperarInventario($inv)) {
             $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
         }
         if ($inv['estado'] !== 'abierto') {
             $this->json(['success' => false, 'message' => 'Ya está cerrado.'], 409);
         }
         $model->cerrar($id);
+        $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
+    }
+
+    // ── Inventario de stock personal (Mi Stock / Stock PFS) — mismo mecanismo
+    // que el de bodega de arriba, objetivo = stock_usuario_id en vez de
+    // bodega_id. Detalle/Escanear/Nota/Cerrar de arriba ya son genéricos
+    // (puedeOperarInventario distingue el tipo de objetivo). ────────────────
+
+    // GET ?action=inventarioStockUsuarios — a quién puede auditar el usuario en sesión:
+    // siempre a sí mismo; admin/coordinador/ati además a los PFS de su alcance.
+    public function inventarioStockUsuarios(): void
+    {
+        $usuarioModel = new Usuario($this->db);
+        $out = [];
+        if ($yo = $usuarioModel->obtenerPorId(Permisos::idUsuario())) {
+            $out[(int) $yo['id']] = $yo;
+        }
+        if (Permisos::esAdmin()) {
+            foreach ($usuarioModel->obtenerTodos() as $u) {
+                if (($u['tipo'] ?? '') === 'pfs') $out[(int) $u['id']] = $u;
+            }
+        } elseif (in_array(Permisos::tipo(), ['coordinador', 'ati'], true)) {
+            foreach (Permisos::misPlazas() as $pid) {
+                foreach ($usuarioModel->obtenerPorPlaza((int) $pid) as $u) {
+                    if (($u['tipo'] ?? '') === 'pfs') $out[(int) $u['id']] = $u;
+                }
+            }
+        }
+        $this->json(array_values($out));
+    }
+
+    // GET ?action=inventarioStockListar&stock_usuario_id= — histórico (por mes).
+    public function inventarioStockListar(): void
+    {
+        $stockUsuarioId = (int) ($_GET['stock_usuario_id'] ?? 0);
+        if ($stockUsuarioId <= 0 || !$this->puedeOperarStockUsuario($stockUsuarioId)) { $this->json([]); }
+        $this->json((new InventarioBodega($this->db))->listarUsuario($stockUsuarioId));
+    }
+
+    // POST ?action=inventarioStockIniciar  stock_usuario_id= — abre (o retoma) el del mes en curso.
+    public function inventarioStockIniciar(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $stockUsuarioId = (int) ($b['stock_usuario_id'] ?? 0);
+        if ($stockUsuarioId <= 0 || !$this->puedeOperarStockUsuario($stockUsuarioId)) {
+            $this->json(['success' => false, 'message' => 'Usuario inválido.'], 400);
+        }
+
+        $model = new InventarioBodega($this->db);
+        $abierto = $model->obtenerAbiertoUsuario($stockUsuarioId);
+        if ($abierto) {
+            $this->json(['success' => true, 'inventario' => $model->obtenerDetalle((int) $abierto['id'])]);
+        }
+
+        $activos = (new Activo($this->db))->obtenerTodosFiltrado(
+            ['stock_usuario_id' => $stockUsuarioId], 1, 5000
+        )['activos'] ?? [];
+        $activoIds = array_map(fn($a) => (int) $a['id'], $activos);
+
+        $id = $model->crearUsuario($stockUsuarioId, date('Y-m'), Permisos::idUsuario(), $activoIds);
         $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
     }
 
@@ -1435,6 +1487,26 @@ class ApiController
             $ids = array_map('intval', array_column($this->bodegasDePlazaApi((int) $pid), 'id'));
             if (in_array($bodegaId, $ids, true)) return true;
         }
+        return false;
+    }
+
+    /** ¿Puede auditar el stock personal de este usuario? Uno mismo siempre; admin siempre; coordinador/ati si está en su alcance. */
+    private function puedeOperarStockUsuario(int $stockUsuarioId): bool
+    {
+        if (Permisos::esAdmin() || Permisos::idUsuario() === $stockUsuarioId) return true;
+        if (!in_array(Permisos::tipo(), ['coordinador', 'ati'], true)) return false;
+        $usuarioModel = new Usuario($this->db);
+        foreach (Permisos::misPlazas() as $pid) {
+            if ($usuarioModel->perteneceAPlaza($stockUsuarioId, (int) $pid)) return true;
+        }
+        return false;
+    }
+
+    /** Despacha al chequeo correcto según el tipo de objetivo del inventario (bodega o stock personal). */
+    private function puedeOperarInventario(array $inv): bool
+    {
+        if (!empty($inv['bodega_id'])) return $this->puedeOperarBodega((int) $inv['bodega_id']);
+        if (!empty($inv['stock_usuario_id'])) return $this->puedeOperarStockUsuario((int) $inv['stock_usuario_id']);
         return false;
     }
 
