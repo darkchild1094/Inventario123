@@ -124,7 +124,10 @@ class ProyectoRentec
         );
         $recibidos->bindParam(':id', $id, PDO::PARAM_INT);
         $recibidos->execute();
-        $cab['recibidos'] = $recibidos->fetchAll(PDO::FETCH_ASSOC);
+        // OJO: 'recibidos'/'instalados' en la cabecera son CONTEOS (int); no
+        // sobreescribirlos aquí con los arreglos o se rompe el contrato JSON
+        // (la app espera número en el listado, arreglo en el detalle).
+        $cab['detalle_recibidos'] = $recibidos->fetchAll(PDO::FETCH_ASSOC);
 
         $instalados = $this->conn->prepare(
             "SELECT m.id AS movimiento_id, m.evento, m.creado_en, m.tienda_id, t.nombre AS tienda_nombre, t.cr_tienda AS cr_tienda,
@@ -145,7 +148,7 @@ class ProyectoRentec
         );
         $instalados->bindParam(':id', $id, PDO::PARAM_INT);
         $instalados->execute();
-        $cab['instalados'] = $instalados->fetchAll(PDO::FETCH_ASSOC);
+        $cab['detalle_instalados'] = $instalados->fetchAll(PDO::FETCH_ASSOC);
 
         return $cab;
     }

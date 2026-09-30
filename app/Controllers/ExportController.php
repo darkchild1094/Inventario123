@@ -235,7 +235,7 @@ class ExportController
         }
 
         $fila = 2;
-        foreach ($detalle['instalados'] ?? [] as $row) {
+        foreach ($detalle['detalle_instalados'] ?? [] as $row) {
             $sheet->setCellValue("A{$fila}", $row['cr_tienda'] ?? '');
             $sheet->setCellValue("B{$fila}", $row['tienda_nombre'] ?? '');
             $sheet->setCellValue("C{$fila}", trim(($row['dispositivo_nombre'] ?? '') . ' ' . ($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
