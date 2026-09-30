@@ -51,6 +51,7 @@ class Activo
         $solo_tienda      = $filtros['solo_tienda']      ?? false;
         $bodega_id        = $filtros['bodega_id']        ?? null;
         $proyecto_rentec_id   = $filtros['proyecto_rentec_id']   ?? null;
+        $solo_rentec          = $filtros['solo_rentec']          ?? false;
         $stock_usuario_tipo   = $filtros['stock_usuario_tipo']   ?? null;
         $identificador_exacto = $filtros['identificador_exacto'] ?? null;
 
@@ -138,6 +139,9 @@ class Activo
         if ($proyecto_rentec_id) {
             $sqlBase .= ' AND a.proyecto_rentec_id = :proyecto_rentec_id';
             $params[':proyecto_rentec_id'] = (int) $proyecto_rentec_id;
+        }
+        if ($solo_rentec) {
+            $sqlBase .= ' AND a.proyecto_rentec_id IS NOT NULL';
         }
         if ($stock_usuario_tipo) {
             $tipos = array_values(array_filter(array_map(
@@ -474,6 +478,9 @@ class Activo
         }
         if (!empty($filtros['solo_tienda'])) {
             $from .= " AND s.tipo = 'tienda'";
+        }
+        if (!empty($filtros['solo_rentec'])) {
+            $from .= ' AND a.proyecto_rentec_id IS NOT NULL';
         }
         if (!empty($filtros['stock_usuario_tipo'])) {
             $tipos = array_values(array_filter(array_map(

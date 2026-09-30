@@ -404,6 +404,7 @@ class Permisos
             'mi_stock'  => ['stock_usuario_id' => self::idUsuario()],
             'stock_pfs' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'pfs']),
             'ati'       => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'ati']),
+            'rentec'    => array_merge(self::scopePlazas(), ['solo_rentec' => true]),
             default     => self::filtrosScope(),
         };
     }
