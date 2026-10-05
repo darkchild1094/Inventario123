@@ -1,0 +1,31 @@
+-- 031 — `num_activo` como identidad única del activo (M-02).
+--
+-- El informe planteaba poner UNIQUE en `serie`, pero los datos no lo permiten:
+-- de los 196 grupos de serie repetida (781 activos), la mayoría NO son
+-- duplicados del mismo equipo, sino el campo usado como texto libre.
+--
+--   serie='FOIU286255' → 88 activos, en 88 tiendas, con 88 num_activo
+--                        distintos y 88 códigos de barras distintos.
+--   serie='BODEGA'     → 56 activos de 10 modelos distintos.
+--   174 activos traen la serie arruinada por Excel ('4.0449832370815e+17').
+--
+-- Forzar UNIQUE en `serie` obligaría a inventar ~585 seriales falsos, que es
+-- peor que no tener la restricción: destruye lo capturado y deja el campo
+-- mintiendo. En cambio `num_activo` (la placa de activo pegada al equipo) ya
+-- se comporta como identidad:
+--
+--   columna         lo tienen   sin dato   en conflicto
+--   serie             26,753          0         781
+--   codigo_barras     22,980      3,773         122
+--   num_activo        26,653        100           0   ← se puede hoy
+--
+-- Con el índice, el sistema deja de aceptar dos activos con el mismo número de
+-- activo, que es la doble captura que queríamos impedir. Los 100 sin
+-- num_activo no estorban (MySQL admite varios NULL en un índice único), pero
+-- tampoco quedan protegidos.
+--
+-- `serie` queda sin restricción a propósito. Pendiente aparte: recapturar las
+-- 174 series en notación científica.
+
+ALTER TABLE `activo`
+  ADD UNIQUE KEY `uq_activo_num_activo` (`num_activo`);

@@ -54,7 +54,10 @@ class ActivoGuardado
 
             if (!$this->activo->crear($datos)) {
                 $this->db->rollBack();
-                return ['ok' => false, 'id' => null, 'error' => 'Error al guardar. Verifique que la serie no esté duplicada.'];
+                // El motivo real lo sabe el modelo. El mensaje viejo culpaba
+                // siempre a la serie, que ni siquiera tiene índice único.
+                return ['ok' => false, 'id' => null,
+                        'error' => $this->activo->ultimoError() ?? 'No se pudo guardar el activo.'];
             }
             $id      = $this->activo->ultimoId();
             $despues = $this->activo->obtenerPorId($id);
@@ -96,7 +99,8 @@ class ActivoGuardado
 
             if (!$this->activo->actualizar($datos)) {
                 $this->db->rollBack();
-                return ['ok' => false, 'id' => null, 'error' => 'Error al actualizar. Verifique que la serie no esté duplicada.'];
+                return ['ok' => false, 'id' => null,
+                        'error' => $this->activo->ultimoError() ?? 'No se pudo actualizar el activo.'];
             }
             $despues = $this->activo->obtenerPorId($id);
 

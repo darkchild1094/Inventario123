@@ -10,9 +10,36 @@ class Activo
     private PDO    $conn;
     private string $table = 'activo';
 
+    /**
+     * Motivo del último fallo por violación de restricción (SQLSTATE 23000),
+     * ya traducido a algo que el usuario pueda entender. crear() y actualizar()
+     * devuelven false en ese caso; antes el mensaje al usuario era siempre
+     * "verifique que la serie no esté duplicada", que ni siquiera era la
+     * restricción que fallaba.
+     */
+    private ?string $ultimoError = null;
+
     public function __construct(PDO $db)
     {
         $this->conn = $db;
+    }
+
+    public function ultimoError(): ?string
+    {
+        return $this->ultimoError;
+    }
+
+    /** Traduce una violación de restricción al nombre del dato que la causó. */
+    private function interpretar23000(string $mensaje): string
+    {
+        return match (true) {
+            str_contains($mensaje, 'uq_activo_num_activo')   => 'Ya existe un activo con ese N° de activo.',
+            str_contains($mensaje, 'uq_activo_idempotency')  => 'Esta alta ya se había registrado.',
+            str_contains($mensaje, 'modelo_id')              => 'Falta el modelo del activo.',
+            str_contains($mensaje, 'stock_id')               => 'No se pudo determinar la ubicación (stock) del activo.',
+            str_contains($mensaje, 'fk_activo_')             => 'Alguna referencia del activo (modelo, tienda o stock) no existe.',
+            default                                          => 'Los datos del activo no pasaron una validación de la base.',
+        };
     }
 
     public static function normalizarStatus(string $status): string
@@ -389,10 +416,14 @@ class Activo
         $sql = "INSERT INTO {$this->table} (" . implode(', ', $campos) . ") VALUES (" . implode(', ', $placeholders) . ")";
 
         try {
+            $this->ultimoError = null;
             $stmt = $this->conn->prepare($sql);
             return $stmt->execute($params);
         } catch (PDOException $e) {
-            if ($e->getCode() === '23000') return false;
+            if ($e->getCode() === '23000') {
+                $this->ultimoError = $this->interpretar23000($e->getMessage());
+                return false;
+            }
             throw $e;
         }
     }
@@ -437,9 +468,13 @@ class Activo
         $sql = "UPDATE {$this->table} SET " . implode(', ', $campos) . " WHERE id = :id";
 
         try {
+            $this->ultimoError = null;
             return $this->conn->prepare($sql)->execute($params);
         } catch (PDOException $e) {
-            if ($e->getCode() === '23000') return false;
+            if ($e->getCode() === '23000') {
+                $this->ultimoError = $this->interpretar23000($e->getMessage());
+                return false;
+            }
             throw $e;
         }
     }
