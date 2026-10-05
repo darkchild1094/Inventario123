@@ -73,41 +73,22 @@ class InventarioBodega
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    /** Abre un inventario del stock personal de un usuario (mismo snapshot que crear(), objetivo distinto). */
-    public function crearUsuario(int $stockUsuarioId, string $periodo, int $usuarioId, array $activoIds): int
+    /**
+     * Abre un inventario del stock personal de un usuario. El snapshot se arma
+     * con INSERT…SELECT (sin traer filas a PHP ni tope de filas) y sólo incluye
+     * lo que la persona puede mostrar físicamente: status 'asignado'. Baja y
+     * garantía viven también en el stock personal del ATI y no deben pedirse.
+     */
+    public function crearUsuario(int $stockUsuarioId, string $periodo, int $usuarioId): int
     {
-        $this->conn->beginTransaction();
-        try {
-            $stmt = $this->conn->prepare(
-                "INSERT INTO inventario_bodega (stock_usuario_id, periodo, usuario_id, total_esperado)
-                 VALUES (:stock_usuario_id, :periodo, :usuario_id, :total_esperado)"
-            );
-            $stmt->execute([
-                ':stock_usuario_id' => $stockUsuarioId,
-                ':periodo'          => $periodo,
-                ':usuario_id'       => $usuarioId,
-                ':total_esperado'   => count($activoIds),
-            ]);
-            $id = (int) $this->conn->lastInsertId();
-
-            if ($activoIds) {
-                $valores = [];
-                $params  = [];
-                foreach ($activoIds as $i => $activoId) {
-                    $valores[] = "(:inv{$i}, :act{$i})";
-                    $params[":inv{$i}"] = $id;
-                    $params[":act{$i}"] = $activoId;
-                }
-                $sql = "INSERT INTO inventario_bodega_detalle (inventario_id, activo_id) VALUES " . implode(',', $valores);
-                $this->conn->prepare($sql)->execute($params);
-            }
-
-            $this->conn->commit();
-            return $id;
-        } catch (\Throwable $e) {
-            $this->conn->rollBack();
-            throw $e;
-        }
+        return $this->abrir(
+            ['stock_usuario_id' => $stockUsuarioId],
+            $periodo,
+            $usuarioId,
+            "JOIN stock s ON s.id = a.stock_id
+             WHERE s.tipo = 'usuario' AND s.usuario_id = :objetivo AND a.status = 'asignado'",
+            $stockUsuarioId
+        );
     }
 
     public function obtenerCabecera(int $id): array|false
@@ -119,41 +100,64 @@ class InventarioBodega
     }
 
     /**
-     * Abre un inventario nuevo con el snapshot de activos indicados
-     * (todos en_bodega al momento de iniciar), estado inicial no-encontrado.
+     * Abre un inventario de bodega con el snapshot de lo que está en_bodega al
+     * momento de iniciar, estado inicial no-encontrado.
      */
-    public function crear(int $bodegaId, string $periodo, int $usuarioId, array $activoIds): int
+    public function crear(int $bodegaId, string $periodo, int $usuarioId): int
     {
+        return $this->abrir(
+            ['bodega_id' => $bodegaId],
+            $periodo,
+            $usuarioId,
+            "JOIN stock s ON s.id = a.stock_id
+             WHERE s.tipo = 'bodega' AND s.bodega_id = :objetivo AND a.status = 'en_bodega'",
+            $bodegaId
+        );
+    }
+
+    /**
+     * Mecánica común de apertura: inserta la cabecera, puebla el detalle con un
+     * INSERT…SELECT sobre $desde (que debe exponer `a` = activo y usar el
+     * placeholder :objetivo) y deja total_esperado cuadrado con lo insertado.
+     *
+     * @param array  $objetivo  ['bodega_id'=>int] | ['stock_usuario_id'=>int]
+     */
+    private function abrir(array $objetivo, string $periodo, int $usuarioId, string $desde, int $objetivoId): int
+    {
+        $col = array_key_first($objetivo);
+
         $this->conn->beginTransaction();
         try {
             $stmt = $this->conn->prepare(
-                "INSERT INTO inventario_bodega (bodega_id, periodo, usuario_id, total_esperado)
-                 VALUES (:bodega_id, :periodo, :usuario_id, :total_esperado)"
+                "INSERT INTO inventario_bodega ({$col}, periodo, usuario_id, total_esperado)
+                 VALUES (:objetivo, :periodo, :usuario_id, 0)"
             );
             $stmt->execute([
-                ':bodega_id'      => $bodegaId,
-                ':periodo'        => $periodo,
-                ':usuario_id'     => $usuarioId,
-                ':total_esperado' => count($activoIds),
+                ':objetivo'   => $objetivoId,
+                ':periodo'    => $periodo,
+                ':usuario_id' => $usuarioId,
             ]);
             $id = (int) $this->conn->lastInsertId();
 
-            if ($activoIds) {
-                $valores = [];
-                $params  = [];
-                foreach ($activoIds as $i => $activoId) {
-                    $valores[] = "(:inv{$i}, :act{$i})";
-                    $params[":inv{$i}"] = $id;
-                    $params[":act{$i}"] = $activoId;
-                }
-                $sql = "INSERT INTO inventario_bodega_detalle (inventario_id, activo_id) VALUES " . implode(',', $valores);
-                $this->conn->prepare($sql)->execute($params);
-            }
+            $ins = $this->conn->prepare(
+                "INSERT INTO inventario_bodega_detalle (inventario_id, activo_id)
+                 SELECT :inv, a.id FROM activo a {$desde}"
+            );
+            $ins->execute([':inv' => $id, ':objetivo' => $objetivoId]);
+
+            // total_esperado = lo que realmente entró al detalle.
+            $this->conn->prepare(
+                "UPDATE inventario_bodega ib
+                 SET total_esperado = (
+                     SELECT COUNT(*) FROM inventario_bodega_detalle WHERE inventario_id = ib.id
+                 )
+                 WHERE ib.id = :id"
+            )->execute([':id' => $id]);
 
             $this->conn->commit();
             return $id;
         } catch (\Throwable $e) {
-            $this->conn->rollBack();
+            if ($this->conn->inTransaction()) $this->conn->rollBack();
             throw $e;
         }
     }

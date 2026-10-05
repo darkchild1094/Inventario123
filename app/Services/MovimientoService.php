@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Activo;
 use App\Models\Movimiento;
 use PDO;
+use RuntimeException;
 
 /**
  * MovimientoService — orquesta la escritura de la bitácora `movimiento` y la
@@ -162,11 +163,26 @@ class MovimientoService
 
         // ── Lado SALE: resolver stock destino y mover ────────────────
         $statusSale = Activo::normalizarStatus($destino['status'] ?? 'asignado');
+        $duenoSale  = (int) ($destino['asignado_usuario_id'] ?? 0) ?: $actorId;
+
+        // El reemplazo NO es una puerta trasera para cambiar de custodia sin
+        // firma: la misma regla que bloquea la edición aplica aquí. Lo único
+        // que pasa sin firma es el retiro al stock del propio actor, que es
+        // justo lo que hace el formulario de Tiendas.
+        $bloqueo = ActivoGuardado::requiereSolicitudFirmada(
+            (string) ($sale['status'] ?? ''), $statusSale, $duenoSale, $actorId
+        );
+        if ($bloqueo !== null) {
+            throw new \RuntimeException(
+                "El equipo que sale no se puede {$bloqueo} desde un reemplazo: usa una Solicitud de movimiento firmada."
+            );
+        }
+
         $ctx = [
             'plaza_id'              => $plazaId,
             'tienda_id'             => $tiendaId,
             'procedencia_tienda_id' => $tiendaId,
-            'asignado_usuario_id'   => (int) ($destino['asignado_usuario_id'] ?? 0) ?: $actorId,
+            'asignado_usuario_id'   => $duenoSale,
             'ati_usuario_id'        => (int) ($destino['ati_usuario_id'] ?? 0) ?: null,
         ];
         $res       = $this->stockResolver->resolver($statusSale, $ctx);
@@ -198,7 +214,11 @@ class MovimientoService
         if (!empty($destino['foto_equipo'])) {
             $datosSale['foto_equipo'] = (string) $destino['foto_equipo'];
         }
-        $this->activo->actualizar($datosSale);
+        // Si el UPDATE falla hay que abortar: antes se ignoraba el retorno y se
+        // registraba un movimiento de un traslado que nunca ocurrió.
+        if (!$this->activo->actualizar($datosSale)) {
+            throw new \RuntimeException('No se pudo mover el equipo que sale del reemplazo; no se registró el movimiento.');
+        }
 
         $saleDespues = $this->activo->obtenerPorId($saleId);
         $this->mov->registrar([

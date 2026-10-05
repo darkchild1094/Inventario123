@@ -81,7 +81,9 @@ class TrasladoService
                 );
             }
 
-            $this->activo->actualizar([
+            // Activo::actualizar ya preserva un serie NULL (antes lo convertía
+            // en '' y aquí había que deshacerlo con un UPDATE correctivo).
+            $movido = $this->activo->actualizar([
                 'id'                    => (int) $antes['id'],
                 'serie'                 => $antes['serie'],
                 'codigo_barras'         => $antes['codigo_barras'],
@@ -92,11 +94,10 @@ class TrasladoService
                 'tienda_uso_id'         => null,
                 'stock_id'              => $stockDestinoId,
             ]);
-
-            // Activo::actualizar hace trim(serie ?? '') → un NULL se volvería ''.
-            if ($antes['serie'] === null) {
-                $this->db->prepare("UPDATE activo SET serie = NULL WHERE id = :id AND serie = ''")
-                    ->execute([':id' => (int) $antes['id']]);
+            if (!$movido) {
+                throw new RuntimeException(
+                    'No se pudo mover el activo ' . ($antes['serie'] ?: ($antes['codigo_barras'] ?: $antes['id'])) . '.'
+                );
             }
 
             $despues = $this->activo->obtenerPorId((int) $antes['id']);

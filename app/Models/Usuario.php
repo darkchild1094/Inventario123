@@ -56,6 +56,25 @@ class Usuario
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Sólo los admins. Son asignables desde cualquier plaza porque no están
+     * atados a una, y obtenerCatalogos() los añadía recorriendo obtenerTodos()
+     * completo — una segunda lectura de toda la tabla en la misma petición.
+     */
+    public function obtenerAdmins(): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT u.id, u.nombre, u.email, u.foto, u.plaza_id, u.tipo,
+                    p.nombre AS plaza_nombre
+             FROM {$this->tabla} u
+             LEFT JOIN plaza p ON u.plaza_id = p.id
+             WHERE u.tipo = 'admin'
+             ORDER BY u.nombre"
+        );
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function obtenerPorPlaza(int $plazaId): array
     {
         $stmt = $this->conn->prepare(

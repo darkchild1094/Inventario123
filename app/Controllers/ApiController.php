@@ -13,7 +13,6 @@ use App\Models\Region;
 use App\Models\Negocio;
 use App\Models\Bodega;
 use App\Models\Stock;
-use App\Models\Area;
 use App\Models\Movimiento;
 use App\Models\SolicitudTraslado;
 use App\Models\InventarioBodega;
@@ -61,7 +60,10 @@ class ApiController
             ],
             // Navegación por módulos (fuente única: Permisos::modulos()).
             'modulos' => Permisos::modulos(),
-            // Compat con la app publicada (navegación por "vista").
+            // Compat con los APK ya instalados (navegación por "vista"). NO se
+            // puede borrar hasta que todos los equipos estén en la versión que
+            // navega sólo por 'modulo': un teléfono sin actualizar se queda sin
+            // listado. Borrar junto con la rama `vista` de listarActivos().
             'vistasDisponibles' => $this->vistasDisponiblesParaTipo($tipo),
         ]);
     }
@@ -111,7 +113,14 @@ class ApiController
             foreach ($this->db->query("SELECT estado, COUNT(*) n FROM solicitud_traslado GROUP BY estado") as $r) {
                 $solPorEstado[$r['estado']] = (int) $r['n'];
             }
-            $sinModelo = (int) $this->db->query("SELECT COUNT(*) FROM activo WHERE modelo_id IS NULL")->fetchColumn();
+            // activo.modelo_id es NOT NULL, así que el viejo "activos sin modelo"
+            // siempre daba 0. Lo que sí puede pasar es que apunte a un modelo
+            // borrado o sin marca: eso es lo que vale la pena vigilar.
+            $sinModelo = (int) $this->db->query(
+                "SELECT COUNT(*) FROM activo a
+                 LEFT JOIN modelo m ON m.id = a.modelo_id
+                 WHERE m.id IS NULL OR m.marca_id IS NULL"
+            )->fetchColumn();
             $salida['tecnico'] = [
                 'usuarios'             => count((new Usuario($this->db))->obtenerTodos()),
                 'tiendas'              => count((new Tienda($this->db))->obtenerTodas()),
@@ -234,11 +243,43 @@ class ApiController
         }
 
         $regionGet = (int) ($_GET['region_id'] ?? 0);
-        if ($regionGet > 0) {
+        if ($regionGet > 0 && ($esAdmin || $this->regionEnAlcance($regionGet, $misPlazas))) {
             $filtros['region_id'] = $regionGet;
         }
 
+        // Acota al stock personal de un ingeniero concreto (lo manda la app al
+        // elegir a alguien en el módulo "Stock PFS"). Sólo en los módulos que
+        // listan stock de OTRAS personas: en 'mi_stock' el dueño es siempre el
+        // propio usuario y aceptarlo aquí dejaría a un pfs ver stock ajeno.
+        $usuarioGet = (int) ($_GET['usuario_id'] ?? 0);
+        if ($usuarioGet > 0 && in_array($modulo, ['stock_pfs', 'ati'], true)) {
+            if (!$esAdmin && !$this->usuarioEnAlcance($usuarioGet, $misPlazas)) {
+                $this->json(['success' => false, 'message' => 'Ese usuario no pertenece a tu plaza.'], 403);
+            }
+            $filtros['stock_usuario_id'] = $usuarioGet;
+        }
+
         return $filtros;
+    }
+
+    /** ¿La región contiene al menos una de las plazas del actor? */
+    private function regionEnAlcance(int $regionId, array $misPlazas): bool
+    {
+        if (!$misPlazas) return false;
+        $ph = implode(',', array_fill(0, count($misPlazas), '?'));
+        $st = $this->db->prepare("SELECT COUNT(*) FROM plaza WHERE region_id = ? AND id IN ({$ph})");
+        $st->execute(array_merge([$regionId], $misPlazas));
+        return (int) $st->fetchColumn() > 0;
+    }
+
+    /** ¿El usuario objetivo pertenece a alguna de las plazas del actor? */
+    private function usuarioEnAlcance(int $usuarioId, array $misPlazas): bool
+    {
+        $um = new Usuario($this->db);
+        foreach ($misPlazas as $pid) {
+            if ($um->perteneceAPlaza($usuarioId, (int) $pid)) return true;
+        }
+        return false;
     }
 
     public function obtenerActivo(): void
@@ -447,6 +488,9 @@ class ApiController
         if ($ganador = $buscarPorClave()) {
             $this->json(['success' => true, 'message' => 'Activo ya registrado.', 'id' => $ganador, 'duplicado' => true]);
         }
+        // Las imágenes se subieron antes del INSERT; si el alta no cuajó hay que
+        // retirarlas o quedan huérfanas en /uploads para siempre.
+        $this->descartarImagenes(array_merge($fotos, ['salida' => $fotoSalida]));
         $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo registrar el activo.'], 400);
     }
 
@@ -478,6 +522,21 @@ class ApiController
             $this->json(['success' => true, 'message' => 'Activo actualizado correctamente.']);
         } else {
             $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo actualizar el activo.'], 400);
+        }
+    }
+
+    /**
+     * Retira imágenes recién subidas cuando la escritura que las acompañaba
+     * falló. ImageHelper::borrarArchivo() se encarga también del thumbnail.
+     * Las firmas no viven en uploads/ sino en uploads/firmas/, de ahí $rutaBase.
+     */
+    private function descartarImagenes(array $nombres, ?string $rutaBase = null): void
+    {
+        $rutaBase ??= ROOT_PATH . '/public/uploads';
+        foreach ($nombres as $nombre) {
+            if (is_string($nombre) && $nombre !== '') {
+                ImageHelper::borrarArchivo($rutaBase, $nombre);
+            }
         }
     }
 
@@ -541,6 +600,17 @@ class ApiController
     {
         $id = (int) ($_GET['id'] ?? 0);
         if ($id <= 0) $this->json(['success' => false, 'message' => 'ID inválido.'], 400);
+
+        // Antes este endpoint no validaba nada: cualquier usuario autenticado
+        // podía leer la ficha de cualquier otro por id. Alcance: uno mismo
+        // siempre, admin siempre, y el resto sólo gente de sus plazas.
+        $puede = Permisos::esAdmin()
+            || Permisos::idUsuario() === $id
+            || $this->usuarioEnAlcance($id, Permisos::misPlazas());
+        if (!$puede) {
+            $this->json(['success' => false, 'message' => 'No tienes permiso para ver este usuario.'], 403);
+        }
+
         $usuario = (new Usuario($this->db))->obtenerPorId($id);
         if ($usuario) {
             unset($usuario['password']);
@@ -631,7 +701,6 @@ class ApiController
 
         $dispositivos = (new Dispositivo($this->db))->leerTodos();
         $modelos      = (new Modelo($this->db))->obtenerTodos();
-        $tiendasTodas = (new Tienda($this->db))->obtenerTodas();
         $bodegasTodas = (new Bodega($this->db))->obtenerTodas();
 
         if (Permisos::puedeVerTodasPlazas()) {
@@ -677,18 +746,19 @@ class ApiController
             $usuarios = $tipo === 'ati' ? (new Usuario($this->db))->obtenerPorPlaza($plazaId) : [];
         }
 
-        // Agregar admins a la lista de usuarios asignables (no están atados a ninguna plaza)
+        // Agregar admins a la lista de usuarios asignables (no están atados a
+        // ninguna plaza). obtenerAdmins() en vez de recorrer toda la tabla.
         if ($tipo !== 'admin') {
             $idsYa = array_column($usuarios, 'id');
-            foreach ((new Usuario($this->db))->obtenerTodos() as $u) {
-                if ($u['tipo'] === 'admin' && !in_array($u['id'], $idsYa, true)) $usuarios[] = $u;
+            foreach ((new Usuario($this->db))->obtenerAdmins() as $u) {
+                if (!in_array($u['id'], $idsYa, true)) $usuarios[] = $u;
             }
         }
 
-        $plazaIdsFiltro = array_column($plazas, 'id');
-        $tiendas = Permisos::puedeVerTodasPlazas()
-            ? $tiendasTodas
-            : array_values(array_filter($tiendasTodas, fn($t) => in_array((int) $t['plaza_id'], $plazaIdsFiltro, true)));
+        // Tiendas acotadas en SQL. Antes se leían las 1,011 y se filtraban en PHP.
+        $tiendas = (new Tienda($this->db))->obtenerPorPlazas(
+            Permisos::puedeVerTodasPlazas() ? [] : array_column($plazas, 'id')
+        );
 
         $this->json([
             'dispositivos' => $dispositivos,
@@ -699,7 +769,6 @@ class ApiController
             'negocios'     => $negocios,
             'usuarios'     => $usuarios,
             'bodegas'      => $bodegasTodas,
-            'areas'        => (new Area($this->db))->obtenerTodas(),
             'status_opts'  => $this->opcionesStatus(),
         ]);
     }
@@ -1084,7 +1153,7 @@ class ApiController
             $this->json(['success' => false, 'message' => 'Sin acceso a esta solicitud.'], 403);
         }
         $sol['activos']       = $model->activosDe($id);
-        $sol['puedeFirmar']   = $this->slotDeUsuario($sol) !== null;
+        $sol['puedeFirmar']   = Permisos::slotDeFirma($sol) !== null;
         $sol['puedeCancelar'] = $sol['estado'] === 'pendiente'
             && in_array(Permisos::idUsuario(), [(int) $sol['solicitante_id'], (int) ($sol['origen_usuario_id'] ?? 0)], true);
         $this->json($sol);
@@ -1183,6 +1252,8 @@ class ApiController
 
         $id = $model->crear($datos);
         if ($id <= 0) {
+            // La firma se guardó antes de crear la solicitud; si no cuajó, fuera.
+            $this->descartarImagenes([$firma], ROOT_PATH . '/public/uploads/firmas');
             $this->json(['success' => false, 'message' => 'No se pudo crear la solicitud.'], 500);
         }
         $this->json(['success' => true, 'message' => 'Solicitud enviada.', 'id' => $id]);
@@ -1198,7 +1269,7 @@ class ApiController
         if (!$sol || $sol['estado'] !== 'pendiente') {
             $this->json(['success' => false, 'message' => 'La solicitud no está pendiente.'], 409);
         }
-        $slot = $this->slotDeUsuario($sol);
+        $slot = Permisos::slotDeFirma($sol);
         if ($slot === null) {
             $this->json(['success' => false, 'message' => 'No te corresponde firmar esta solicitud.'], 403);
         }
@@ -1206,7 +1277,7 @@ class ApiController
         if (!$firma) {
             $this->json(['success' => false, 'message' => 'Falta tu firma o no se pudo procesar.'], 400);
         }
-        $rol = $sol['destino'] === 'garantia' ? ($slot === 1 ? 'ati' : 'coordinador') : 'unico';
+        $rol = Permisos::rolDeFirma((string) $sol['destino'], $slot);
 
         try {
             $this->db->beginTransaction();
@@ -1242,7 +1313,7 @@ class ApiController
         if (!$sol || $sol['estado'] !== 'pendiente') {
             $this->json(['success' => false, 'message' => 'La solicitud no está pendiente.'], 409);
         }
-        if ($this->slotDeUsuario($sol) === null) {
+        if (Permisos::slotDeFirma($sol) === null) {
             $this->json(['success' => false, 'message' => 'No te corresponde resolver esta solicitud.'], 403);
         }
         if ($motivo === '') {
@@ -1333,12 +1404,10 @@ class ApiController
             $this->json(['success' => true, 'inventario' => $model->obtenerDetalle((int) $abierto['id'])]);
         }
 
-        $activos = (new Activo($this->db))->obtenerTodosFiltrado(
-            ['bodega_id' => $bodegaId, 'status' => 'en_bodega'], 1, 5000
-        )['activos'] ?? [];
-        $activoIds = array_map(fn($a) => (int) $a['id'], $activos);
-
-        $id = $model->crear($bodegaId, date('Y-m'), Permisos::idUsuario(), $activoIds);
+        // El snapshot se arma con INSERT…SELECT dentro del modelo: antes se
+        // traían las filas a PHP con un tope de 5000 y, si la bodega lo
+        // superaba, el inventario nacía incompleto sin avisar.
+        $id = $model->crear($bodegaId, date('Y-m'), Permisos::idUsuario());
         $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
     }
 
@@ -1479,12 +1548,11 @@ class ApiController
             $this->json(['success' => true, 'inventario' => $model->obtenerDetalle((int) $abierto['id'])]);
         }
 
-        $activos = (new Activo($this->db))->obtenerTodosFiltrado(
-            ['stock_usuario_id' => $stockUsuarioId], 1, 5000
-        )['activos'] ?? [];
-        $activoIds = array_map(fn($a) => (int) $a['id'], $activos);
-
-        $id = $model->crearUsuario($stockUsuarioId, date('Y-m'), Permisos::idUsuario(), $activoIds);
+        // Sólo lo que la persona debe poder mostrar físicamente: 'asignado'.
+        // Sin este filtro entraban también baja y garantía, que StockResolver
+        // deja en el stock personal del ATI, y el inventario exigía encontrar
+        // equipo ya dado de baja.
+        $id = $model->crearUsuario($stockUsuarioId, date('Y-m'), Permisos::idUsuario());
         $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
     }
 
@@ -1599,30 +1667,6 @@ class ApiController
             && in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
     }
 
-    /** Mismo criterio que SolicitudTrasladoController::slotDeUsuario(). */
-    private function slotDeUsuario(array $sol): ?int
-    {
-        if ($sol['estado'] !== 'pendiente') return null;
-        $uid  = Permisos::idUsuario();
-        $tipo = Permisos::tipo();
-        $enPlaza = Permisos::esAdmin() || in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
-
-        switch ($sol['destino']) {
-            case 'asignado':
-                return ((int) ($sol['destino_usuario_id'] ?? 0) === $uid && empty($sol['aprobador_id'])) ? 1 : null;
-            case 'en_bodega':
-                return ($enPlaza && in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null;
-            case 'baja':
-                return ($enPlaza && in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null;
-            case 'garantia':
-                if (!$enPlaza) return null;
-                if (in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) return 1;
-                if (in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador2_id'])) return 2;
-                return null;
-        }
-        return null;
-    }
-
     // GET ?action=obtenerAtisPorPlaza&plaza_id=X
     public function obtenerAtisPorPlaza(): void
     {
@@ -1699,8 +1743,9 @@ class ApiController
             }
 
             session_regenerate_id(true);
+            // La migración 026 ya renombró 'fs' → 'pfs' en el enum de la BD
+            // (verificado contra producción), así que no hay nada que traducir.
             $tipo = strtolower(trim($usuario['tipo'] ?? 'pfs'));
-            if ($tipo === 'fs') $tipo = 'pfs'; // compat: BD sin migrar (026)
 
             $_SESSION['usuario'] = [
                 'id'           => $usuario['id'],

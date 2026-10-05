@@ -228,7 +228,7 @@ class SolicitudTrasladoController
         }
 
         $activos      = $model->activosDe($id);
-        $puedeFirmar  = $this->slotDeUsuario($sol) !== null;
+        $puedeFirmar  = Permisos::slotDeFirma($sol) !== null;
         $puedeCancelar = $sol['estado'] === 'pendiente'
             && in_array(Permisos::idUsuario(), [(int) $sol['solicitante_id'], (int) $sol['origen_usuario_id']], true);
         $movimientos  = $sol['estado'] === 'aprobada' && !empty($sol['grupo_id'])
@@ -252,7 +252,7 @@ class SolicitudTrasladoController
         if (!$sol || $sol['estado'] !== 'pendiente') {
             $this->error('La solicitud no está pendiente.', 'index.php?controller=solicitud&action=index');
         }
-        $slot = $this->slotDeUsuario($sol);
+        $slot = Permisos::slotDeFirma($sol);
         if ($slot === null) {
             $this->error('No te corresponde firmar esta solicitud.', $ver);
         }
@@ -266,9 +266,7 @@ class SolicitudTrasladoController
             $this->error('No se pudo procesar tu firma.', $ver);
         }
 
-        $rol = $sol['destino'] === 'garantia'
-            ? ($slot === 1 ? 'ati' : 'coordinador')
-            : 'unico';
+        $rol = Permisos::rolDeFirma((string) $sol['destino'], $slot);
 
         try {
             $this->db->beginTransaction();
@@ -304,7 +302,7 @@ class SolicitudTrasladoController
         if (!$sol || $sol['estado'] !== 'pendiente') {
             $this->error('La solicitud no está pendiente.', 'index.php?controller=solicitud&action=index');
         }
-        if ($this->slotDeUsuario($sol) === null) {
+        if (Permisos::slotDeFirma($sol) === null) {
             $this->error('No te corresponde resolver esta solicitud.', $ver);
         }
         if ($motivo === '') {
@@ -391,39 +389,6 @@ class SolicitudTrasladoController
         ]), true)) return true;
         return Permisos::puedeAprobarTraslados()
             && in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
-    }
-
-    /**
-     * ¿En qué slot de firma puede firmar el usuario actual? 1, 2 o null.
-     *   destino=asignado → slot 1 solo el destino_usuario_id
-     *   destino=en_bodega → slot 1 coordinador (o admin) de la plaza
-     *   destino=baja → slot 1 ATI (o admin) de la plaza
-     *   destino=garantia → slot 1 ATI, slot 2 coordinador (o admin en el que falte)
-     */
-    private function slotDeUsuario(array $sol): ?int
-    {
-        if ($sol['estado'] !== 'pendiente') return null;
-        $uid  = Permisos::idUsuario();
-        $tipo = Permisos::tipo();
-        $enPlaza = Permisos::esAdmin() || in_array((int) $sol['plaza_id'], Permisos::misPlazas(), true);
-
-        switch ($sol['destino']) {
-            case 'asignado':
-                return ((int) ($sol['destino_usuario_id'] ?? 0) === $uid && empty($sol['aprobador_id'])) ? 1 : null;
-
-            case 'en_bodega':
-                return ($enPlaza && in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null;
-
-            case 'baja':
-                return ($enPlaza && in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null;
-
-            case 'garantia':
-                if (!$enPlaza) return null;
-                if (in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) return 1;
-                if (in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador2_id'])) return 2;
-                return null;
-        }
-        return null;
     }
 
     private function movimientosDelGrupo(string $grupoId): array

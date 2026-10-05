@@ -119,6 +119,42 @@ class ActivoGuardado
         }
     }
 
+    /**
+     * ÚNICA fuente de verdad de "¿este cambio de custodia exige una Solicitud
+     * de movimiento firmada?". Devuelve la etiqueta de la acción bloqueada, o
+     * null si el cambio se puede hacer directo.
+     *
+     * Permitido sin firma:
+     *   · cualquier cosa → 'en_uso'  (instalar o mover entre tiendas)
+     *   · el estatus no cambia
+     *   · 'en_uso' → 'asignado' cuando el destino es el propio actor
+     *     (retiro directo a tu stock: la custodia no pasa a un tercero)
+     *   · el activo no estaba bajo custodia (p. ej. un alta)
+     *
+     * La llaman prepararStock() (edición) y MovimientoService::ejecutarReemplazo()
+     * (el equipo que sale de un reemplazo).
+     *
+     * @param int $duenoNuevo usuario destino cuando $stNuevo es 'asignado'
+     */
+    public static function requiereSolicitudFirmada(
+        string $stAntes,
+        string $stNuevo,
+        int $duenoNuevo,
+        int $actorId
+    ): ?string {
+        if ($stNuevo === 'en_uso') return null;
+        if (!in_array($stAntes, ['asignado', 'en_uso', 'en_bodega'], true)) return null;
+        if ($stNuevo === $stAntes) return null;
+        if ($stNuevo === 'asignado' && $stAntes === 'en_uso' && $duenoNuevo === $actorId) return null;
+
+        return [
+            'en_bodega' => 'devolver equipo a bodega',
+            'asignado'  => 'traspasar equipo a otro ingeniero',
+            'baja'      => 'dar de baja',
+            'garantia'  => 'enviar a garantía',
+        ][$stNuevo] ?? null;
+    }
+
     // ── internos ─────────────────────────────────────────────────────
 
     /**
@@ -139,31 +175,17 @@ class ActivoGuardado
                 return $this->err('Este activo tiene una solicitud de movimiento pendiente; no se puede modificar hasta resolverla.');
             }
 
-            // 2) Todo cambio de dueño/estatus de un activo que hoy está en manos
-            //    de un ingeniero (asignado), de una tienda (en_uso) o de una
-            //    bodega (en_bodega) requiere una Solicitud de movimiento firmada
-            //    — para TODOS los roles, incluido admin. Excepciones:
-            //    instalar/mover a tienda ('en_uso'), reasignar al MISMO
-            //    ingeniero, RETIRAR de una tienda a TU PROPIO stock, y quedarse igual.
-            $stAntes = $antes['status'] ?? '';
-            if (in_array($stAntes, ['asignado', 'en_uso', 'en_bodega'], true) && $status !== $stAntes && $status !== 'en_uso') {
-                $actorIdChk = (int) ($actor['id'] ?? 0);
-                $mismoDueno = $status === 'asignado' && $stAntes === 'asignado'
-                    && (int) ($post['asignado_usuario_id'] ?? 0) === (int) ($antes['usuario_stock_id'] ?? 0);
-                // Retiro directo: sacar de una tienda ('en_uso') hacia el stock
-                // personal del propio usuario que lo retira. No cambia de custodia
-                // a un tercero, así que no exige Solicitud firmada.
-                $retiroAMiStock = $status === 'asignado' && $stAntes === 'en_uso'
-                    && (int) ($post['asignado_usuario_id'] ?? 0) === $actorIdChk;
-                if (!$mismoDueno && !$retiroAMiStock && in_array($status, ['asignado', 'en_bodega', 'baja', 'garantia'], true)) {
-                    $lbl = [
-                        'en_bodega' => 'devolver equipo a bodega',
-                        'asignado'  => 'traspasar equipo a otro ingeniero',
-                        'baja'      => 'dar de baja',
-                        'garantia'  => 'enviar a garantía',
-                    ][$status];
-                    return $this->err("Para {$lbl} usa una Solicitud de movimiento (requiere firma y autorización). No se puede cambiar el estatus directo aquí.");
-                }
+            // 2) Cambio de custodia → exige Solicitud firmada. La regla vive en
+            //    requiereSolicitudFirmada() para que el reemplazo la aplique
+            //    también (antes el reemplazo la esquivaba por completo).
+            $lbl = self::requiereSolicitudFirmada(
+                (string) ($antes['status'] ?? ''),
+                $status,
+                (int) ($post['asignado_usuario_id'] ?? 0),
+                (int) ($actor['id'] ?? 0)
+            );
+            if ($lbl !== null) {
+                return $this->err("Para {$lbl} usa una Solicitud de movimiento (requiere firma y autorización). No se puede cambiar el estatus directo aquí.");
             }
         }
         $actorId = (int) ($actor['id'] ?? 0);

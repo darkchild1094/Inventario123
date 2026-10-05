@@ -29,6 +29,12 @@ class Activo
         };
     }
 
+    /**
+     * Normaliza un identificador opcional (serie, código de barras, N° de
+     * activo): '' y sólo-espacios se guardan como NULL. Antes `serie` usaba
+     * trim($x ?? '') y un NULL legítimo (migración 019) acababa como cadena
+     * vacía, lo que obligaba a parches correctivos tras cada UPDATE.
+     */
     private static function limpiarCodigoBarras(?string $valor): ?string
     {
         $valor = trim((string) $valor);
@@ -55,18 +61,24 @@ class Activo
         $stock_usuario_tipo   = $filtros['stock_usuario_tipo']   ?? null;
         $identificador_exacto = $filtros['identificador_exacto'] ?? null;
 
+        // OJO: aquí no debe entrar ningún JOIN 1:N. `area_modelo` y
+        // `bodega_acceso_plaza` lo son, y al unirlos multiplicaban la fila del
+        // activo (un activo en una bodega con 2 plazas salía y se contaba
+        // doble). La plaza de una bodega se resuelve con una subconsulta
+        // escalar, y `area` se quitó: area_modelo está vacía y el dato no se usa.
         $sqlBase = "FROM {$this->table} a
                     LEFT JOIN modelo      mo  ON a.modelo_id             = mo.id
                     LEFT JOIN marca       ma  ON mo.marca_id             = ma.id
                     LEFT JOIN dispositivo d   ON mo.dispositivo_id       = d.id
-                    LEFT JOIN area_modelo am  ON am.modelo_id            = mo.id
-                    LEFT JOIN area        ar  ON am.area_id              = ar.id
                     LEFT JOIN stock       s   ON a.stock_id              = s.id
                     LEFT JOIN usuario     u   ON s.usuario_id            = u.id
                     LEFT JOIN bodega      b   ON s.bodega_id             = b.id
                     LEFT JOIN tienda      ts  ON s.tienda_id             = ts.id
-                    LEFT JOIN bodega_acceso_plaza bap ON bap.bodega_id   = b.id
-                    LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, ts.plaza_id, bap.plaza_id, u.plaza_id) = p.id
+                    LEFT JOIN plaza       p   ON COALESCE(
+                        s.plaza_id, ts.plaza_id,
+                        (SELECT bap.plaza_id FROM bodega_acceso_plaza bap
+                          WHERE bap.bodega_id = b.id ORDER BY bap.plaza_id LIMIT 1),
+                        u.plaza_id) = p.id
                     LEFT JOIN region      r   ON p.region_id             = r.id
                     LEFT JOIN negocio     n   ON r.negocio_id            = n.id
                     LEFT JOIN tienda      tu  ON a.tienda_uso_id         = tu.id
@@ -177,8 +189,9 @@ class Activo
             $sqlBase .= ' AND (' . implode(' OR ', $ors) . ')';
         }
 
-        // Total
-        $stmtCount = $this->conn->prepare("SELECT COUNT(a.id) {$sqlBase}");
+        // Total — DISTINCT como red de seguridad: si algún día vuelve a entrar
+        // un JOIN 1:N aquí, el conteo seguirá siendo de activos, no de filas.
+        $stmtCount = $this->conn->prepare("SELECT COUNT(DISTINCT a.id) {$sqlBase}");
         $stmtCount->execute($params);
         $total = (int) $stmtCount->fetchColumn();
 
@@ -190,12 +203,12 @@ class Activo
         $sql = "SELECT
                     a.id, a.serie, a.codigo_barras, a.num_activo, a.modelo_id, a.status,
                     a.procedencia_tienda_id, a.tienda_uso_id, a.stock_id,
+                    a.proyecto_rentec_id,
                     a.fecha_alta, a.fecha_modificacion,
                     mo.nombre  AS modelo_nombre,
                     ma.nombre  AS marca_nombre,
                     d.id       AS dispositivo_id,
                     d.nombre   AS dispositivo_nombre,
-                    ar.nombre  AS area_nombre,
                     s.tipo     AS stock_tipo,
                     u.id       AS usuario_stock_id,
                     u.nombre   AS usuario_nombre,
@@ -243,7 +256,6 @@ class Activo
                     ma.nombre  AS marca_nombre,
                     d.id       AS dispositivo_id,
                     d.nombre   AS dispositivo_nombre,
-                    ar.nombre  AS area_nombre,
                     s.tipo     AS stock_tipo,
                     u.id       AS usuario_stock_id,
                     u.nombre   AS usuario_nombre,
@@ -261,14 +273,15 @@ class Activo
                 LEFT JOIN modelo      mo  ON a.modelo_id             = mo.id
                 LEFT JOIN marca       ma  ON mo.marca_id             = ma.id
                 LEFT JOIN dispositivo d   ON mo.dispositivo_id       = d.id
-                LEFT JOIN area_modelo am  ON am.modelo_id            = mo.id
-                LEFT JOIN area        ar  ON am.area_id              = ar.id
                 LEFT JOIN stock       s   ON a.stock_id              = s.id
                 LEFT JOIN usuario     u   ON s.usuario_id            = u.id
                 LEFT JOIN bodega      b   ON s.bodega_id             = b.id
                 LEFT JOIN tienda      ts  ON s.tienda_id             = ts.id
-                LEFT JOIN bodega_acceso_plaza bap ON bap.bodega_id   = b.id
-                LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, ts.plaza_id, bap.plaza_id, u.plaza_id) = p.id
+                LEFT JOIN plaza       p   ON COALESCE(
+                    s.plaza_id, ts.plaza_id,
+                    (SELECT bap.plaza_id FROM bodega_acceso_plaza bap
+                      WHERE bap.bodega_id = b.id ORDER BY bap.plaza_id LIMIT 1),
+                    u.plaza_id) = p.id
                 LEFT JOIN region      r   ON p.region_id             = r.id
                 LEFT JOIN negocio     n   ON r.negocio_id            = n.id
                 LEFT JOIN tienda      tu  ON a.tienda_uso_id         = tu.id
@@ -339,7 +352,7 @@ class Activo
         ];
 
         $params = [
-            ':serie'                 => trim($datos['serie'] ?? ''),
+            ':serie'                 => self::limpiarCodigoBarras($datos['serie'] ?? null),
             ':codigo_barras'                 => self::limpiarCodigoBarras($datos['codigo_barras'] ?? null),
             ':num_activo'                    => self::limpiarCodigoBarras($datos['num_activo'] ?? null),
             ':modelo_id'             => !empty($datos['modelo_id'])             ? (int) $datos['modelo_id']             : null,
@@ -399,7 +412,7 @@ class Activo
 
         $params = [
             ':id'                    => (int) $datos['id'],
-            ':serie'                 => trim($datos['serie'] ?? ''),
+            ':serie'                 => self::limpiarCodigoBarras($datos['serie'] ?? null),
             ':codigo_barras'                 => self::limpiarCodigoBarras($datos['codigo_barras'] ?? null),
             ':num_activo'                    => self::limpiarCodigoBarras($datos['num_activo'] ?? null),
             ':modelo_id'             => !empty($datos['modelo_id'])             ? (int) $datos['modelo_id']             : null,
@@ -447,6 +460,7 @@ class Activo
      */
     public function resumen(array $filtros = []): array
     {
+        // Sin JOIN a bodega_acceso_plaza (es 1:N y duplicaba los conteos).
         $from = "FROM {$this->table} a
                  LEFT JOIN modelo      mo  ON a.modelo_id       = mo.id
                  LEFT JOIN dispositivo d   ON mo.dispositivo_id = d.id
@@ -454,8 +468,11 @@ class Activo
                  LEFT JOIN usuario     u   ON s.usuario_id      = u.id
                  LEFT JOIN bodega      b   ON s.bodega_id       = b.id
                  LEFT JOIN tienda      ts  ON s.tienda_id       = ts.id
-                 LEFT JOIN bodega_acceso_plaza bap ON bap.bodega_id = b.id
-                 LEFT JOIN plaza       p   ON COALESCE(s.plaza_id, ts.plaza_id, bap.plaza_id, u.plaza_id) = p.id
+                 LEFT JOIN plaza       p   ON COALESCE(
+                     s.plaza_id, ts.plaza_id,
+                     (SELECT bap.plaza_id FROM bodega_acceso_plaza bap
+                       WHERE bap.bodega_id = b.id ORDER BY bap.plaza_id LIMIT 1),
+                     u.plaza_id) = p.id
                  WHERE 1=1";
         $params = [];
 

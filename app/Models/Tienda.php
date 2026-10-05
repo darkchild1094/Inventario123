@@ -49,6 +49,35 @@ class Tienda
     }
 
     /**
+     * Tiendas de un conjunto de plazas, filtrado en SQL. $plazaIds vacío = todas.
+     * obtenerCatalogos() usaba obtenerTodas() + array_filter en PHP, trayendo las
+     * 1,011 tiendas en cada llamada para quedarse con las de una plaza.
+     */
+    public function obtenerPorPlazas(array $plazaIds): array
+    {
+        $plazaIds = array_values(array_filter(array_map('intval', $plazaIds)));
+        if (!$plazaIds) return $this->obtenerTodas();
+
+        $ph = implode(',', array_fill(0, count($plazaIds), '?'));
+        $stmt = $this->conn->prepare(
+            "SELECT t.id, t.cr_tienda, t.nombre, t.coordenadas, t.plaza_id, t.ati_usuario_id,
+                    p.nombre AS plaza_nombre,
+                    r.nombre AS region_nombre,
+                    n.nombre AS negocio_nombre,
+                    ua.nombre AS ati_nombre
+             FROM {$this->table} t
+             LEFT JOIN plaza   p ON t.plaza_id   = p.id
+             LEFT JOIN region  r ON p.region_id  = r.id
+             LEFT JOIN negocio n ON r.negocio_id = n.id
+             LEFT JOIN usuario ua ON ua.id = t.ati_usuario_id
+             WHERE t.plaza_id IN ({$ph})
+             ORDER BY t.nombre"
+        );
+        $stmt->execute($plazaIds);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Lista de tiendas para el módulo "Tiendas": nombre, CR, ATI responsable y
      * el número de activos que hoy viven en el stock de la tienda.
      * $plazaIds vacío = todas (admin). $busqueda filtra por nombre o CR.

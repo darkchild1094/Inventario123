@@ -89,10 +89,13 @@ class StockResolver
             return ['stock' => false, 'nota' => 'La plaza no tiene una bodega configurada.'];
         }
 
+        // Stock::obtenerPorBodega() ya crea la fila si no existe, así que basta
+        // con comprobar el caso real de fallo. Antes había aquí una condición
+        // imposible (si devuelve fila, su bodega_id es el pedido por definición)
+        // y el caso que sí podía pasar —que no devolviera nada— no se cubría.
         $stock = $this->stock->obtenerPorBodega((int) $bodega['id']);
-        if ($stock && (int) ($stock['bodega_id'] ?? 0) !== (int) $bodega['id']) {
-            $this->stock->crearParaBodega((int) $bodega['id']);
-            $stock = $this->stock->obtenerPorBodega((int) $bodega['id']);
+        if (!$stock) {
+            return ['stock' => false, 'nota' => 'No se pudo preparar el stock de la bodega.'];
         }
         return ['stock' => $stock, 'nota' => null];
     }

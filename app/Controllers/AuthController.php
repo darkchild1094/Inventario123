@@ -92,8 +92,8 @@ class AuthController
             ]);
         }
 
+        // La migración 026 ya renombró 'fs' → 'pfs' en el enum de la BD.
         $tipo = strtolower(trim($usuario['tipo'] ?? 'pfs'));
-        if ($tipo === 'fs') $tipo = 'pfs'; // compat: BD sin migrar (026)
 
         $_SESSION['usuario'] = [
             'id'        => $usuario['id'],

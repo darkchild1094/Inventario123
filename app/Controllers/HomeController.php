@@ -12,7 +12,6 @@ use App\Models\Negocio;
 use App\Models\Usuario;
 use App\Models\Bodega;
 use App\Models\Stock;
-use App\Models\Area;
 use App\Models\Movimiento;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
@@ -673,7 +672,9 @@ class HomeController
         $out = fopen('php://output', 'w');
         fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM UTF-8
 
-        fputcsv($out, ['ID', 'Serie', 'Código de barras', 'N° de activo', 'Dispositivo', 'Modelo', 'Área', 'Status',
+        // Sin columna "Área": area_modelo nunca se pobló, así que siempre salía
+        // vacía, y su JOIN duplicaba filas en el listado.
+        fputcsv($out, ['ID', 'Serie', 'Código de barras', 'N° de activo', 'Dispositivo', 'Modelo', 'Status',
                        'Plaza', 'Negocio', 'Stock (tipo)', 'Técnico/Bodega',
                        'Tienda en uso', 'Procedencia', 'Fecha alta']);
 
@@ -685,7 +686,6 @@ class HomeController
                 $a['num_activo'] ?? '',
                 $a['dispositivo_nombre'] ?? '',
                 $a['modelo_nombre'] ?? '',
-                $a['area_nombre'] ?? '',
                 $a['status'],
                 $a['plaza_nombre'] ?? '',
                 $a['negocio_nombre'] ?? '',

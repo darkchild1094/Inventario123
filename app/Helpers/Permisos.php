@@ -52,9 +52,6 @@ class Permisos
     public static function esPfs(): bool           { return self::tipo() === 'pfs'; }
     public static function esAti(): bool           { return self::tipo() === 'ati'; }
 
-    /** @deprecated usa esPfs(). Se mantiene por si alguna vista vieja lo llama. */
-    public static function esFs(): bool            { return self::esPfs(); }
-
     // ── Permisos específicos ──────────────────────────────────────────────────
 
     /** Puede ver activos de todas las plazas (no restringido a su plaza) */
@@ -67,12 +64,6 @@ class Permisos
     public static function puedeFiltrarPorPlaza(): bool
     {
         return in_array(self::tipo(), ['admin', 'coordinador'], true);
-    }
-
-    /** Puede ver activos de su plaza (coordinador y ati) o solo su stock (pfs) */
-    public static function puedeVerSuPlaza(): bool
-    {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'ati']);
     }
 
     /** PFS: solo ve su propio stock */
@@ -188,10 +179,14 @@ class Permisos
         };
     }
 
-    /** Puede ver el menú Bodega (vista general) */
+    /**
+     * Puede ver el módulo Bodega. Se deriva de MODULOS_POR_ROL para que exista
+     * UNA sola respuesta: antes esta lista y la del menú discrepaban (pfs veía
+     * el módulo en el menú y recibía 403 al entrar por la ruta vieja).
+     */
     public static function puedeVerBodega(): bool
     {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'ati']);
+        return self::moduloPermitido('bodega');
     }
 
     /** Puede ver la pestaña Historial */
@@ -234,38 +229,48 @@ class Permisos
         return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
     }
 
-    /** ¿Puede este usuario firmar una solicitud con este `destino`, según su rol? */
-    public static function puedeAprobarDestino(string $destino): bool
+    /**
+     * Matriz de firma — ÚNICA fuente de verdad de "¿qué slot de firma le toca a
+     * este usuario en esta solicitud?". Devuelve 1, 2 o null (no le toca).
+     *
+     *   destino     slot 1              slot 2
+     *   ─────────────────────────────────────────────────────
+     *   asignado    quien recibe        —
+     *   en_bodega   coordinador|admin   —
+     *   baja        ati|admin           —
+     *   garantia    ati|admin           coordinador|admin
+     *
+     * Antes vivía duplicada en ApiController::slotDeUsuario() y en
+     * SolicitudTrasladoController::slotDeUsuario(), más una tercera copia
+     * inservible aquí (puedeAprobarDestino/rolAprobacion/plazasParaAprobar).
+     */
+    public static function slotDeFirma(array $sol): ?int
     {
-        $t = self::tipo();
-        return match ($destino) {
-            'en_bodega' => in_array($t, ['coordinador', 'admin'], true),
-            'baja'      => in_array($t, ['ati', 'admin'], true),
-            'garantia'  => in_array($t, ['ati', 'coordinador', 'admin'], true),
-            'asignado'  => true, // lo valida el destino_usuario_id, no el rol
-            default     => false,
+        if (($sol['estado'] ?? '') !== 'pendiente') return null;
+
+        $uid     = self::idUsuario();
+        $tipo    = self::tipo();
+        $enPlaza = self::esAdmin() || in_array((int) ($sol['plaza_id'] ?? 0), self::misPlazas(), true);
+
+        return match ($sol['destino'] ?? '') {
+            'asignado'  => ((int) ($sol['destino_usuario_id'] ?? 0) === $uid && empty($sol['aprobador_id'])) ? 1 : null,
+            'en_bodega' => ($enPlaza && in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null,
+            'baja'      => ($enPlaza && in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null,
+            'garantia'  => match (true) {
+                !$enPlaza => null,
+                in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])          => 1,
+                in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador2_id']) => 2,
+                default   => null,
+            },
+            default     => null,
         };
     }
 
-    /** El "rol" con el que este usuario firma una solicitud (slot de firma). */
-    public static function rolAprobacion(): string
+    /** El nombre del slot con el que se guarda la firma (columna firma_aprobador*). */
+    public static function rolDeFirma(string $destino, int $slot): string
     {
-        return match (self::tipo()) {
-            'ati'                  => 'ati',
-            'coordinador'          => 'coordinador',
-            'admin'               => 'admin', // el controlador decide el slot que falte
-            default               => 'ingeniero',
-        };
-    }
-
-    /** admin → [] (todas); coordinador/ati → sus plazas; otros → [-1]. */
-    public static function plazasParaAprobar(): array
-    {
-        return match (self::tipo()) {
-            'admin'                => [],
-            'coordinador', 'ati'   => self::misPlazas(),
-            default               => [-1],
-        };
+        if ($destino !== 'garantia') return 'unico';
+        return $slot === 1 ? 'ati' : 'coordinador';
     }
 
     /**
