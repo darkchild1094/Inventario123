@@ -170,7 +170,8 @@ class MovimientoService
         // que pasa sin firma es el retiro al stock del propio actor, que es
         // justo lo que hace el formulario de Tiendas.
         $bloqueo = ActivoGuardado::requiereSolicitudFirmada(
-            (string) ($sale['status'] ?? ''), $statusSale, $duenoSale, $actorId
+            (string) ($sale['status'] ?? ''), $statusSale, $duenoSale, $actorId,
+            (int) ($sale['usuario_stock_id'] ?? 0)
         );
         if ($bloqueo !== null) {
             throw new \RuntimeException(

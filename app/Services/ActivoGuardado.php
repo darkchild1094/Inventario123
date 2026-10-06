@@ -149,23 +149,41 @@ class ActivoGuardado
      * La llaman prepararStock() (edición) y MovimientoService::ejecutarReemplazo()
      * (el equipo que sale de un reemplazo).
      *
-     * @param int $duenoNuevo usuario destino cuando $stNuevo es 'asignado'
+     * @param int $duenoNuevo dueño destino YA resuelto (cuando $stNuevo es 'asignado')
+     * @param int $duenoAntes dueño actual, si el activo estaba en un stock personal
      */
     public static function requiereSolicitudFirmada(
         string $stAntes,
         string $stNuevo,
         int $duenoNuevo,
-        int $actorId
+        int $actorId,
+        int $duenoAntes = 0
     ): ?string {
+        // Mover a un lugar físico no cambia de manos.
         if ($stNuevo === 'en_uso' || $stNuevo === 'en_bodega') return null;
+        // Un activo que no estaba bajo custodia (un alta) no tiene nada que proteger.
         if (!in_array($stAntes, ['asignado', 'en_uso', 'en_bodega'], true)) return null;
+
+        if ($stNuevo === 'asignado') {
+            // OJO: aquí no basta con "el estatus no cambió". Un activo puede ir de
+            // 'asignado' a 'asignado' y aun así cambiar de dueño, que es
+            // exactamente el traspaso que la firma debe cubrir. Antes se permitía
+            // porque la guarda sólo miraba el estatus.
+            if ($stAntes === 'asignado' && $duenoNuevo > 0 && $duenoNuevo === $duenoAntes) {
+                return null; // sigue con el mismo ingeniero
+            }
+            // Retiro directo de una tienda al stock personal de quien lo retira.
+            if ($stAntes === 'en_uso' && $duenoNuevo === $actorId) return null;
+
+            return 'traspasar equipo a otro ingeniero';
+        }
+
+        // baja | garantia: si ya estaba así, no hay cambio que autorizar.
         if ($stNuevo === $stAntes) return null;
-        if ($stNuevo === 'asignado' && $stAntes === 'en_uso' && $duenoNuevo === $actorId) return null;
 
         return [
-            'asignado'  => 'traspasar equipo a otro ingeniero',
-            'baja'      => 'dar de baja',
-            'garantia'  => 'enviar a garantía',
+            'baja'     => 'dar de baja',
+            'garantia' => 'enviar a garantía',
         ][$stNuevo] ?? null;
     }
 
@@ -192,11 +210,21 @@ class ActivoGuardado
             // 2) Cambio de custodia → exige Solicitud firmada. La regla vive en
             //    requiereSolicitudFirmada() para que el reemplazo la aplique
             //    también (antes el reemplazo la esquivaba por completo).
+            // El dueño destino que se evalúa tiene que ser el EFECTIVO, el mismo
+            // que resolverá más abajo: si no viene en el POST se asume uno mismo,
+            // y a un pfs siempre se le fuerza a sí mismo. Comparar el valor crudo
+            // bloqueaba ediciones legítimas (el formulario no manda el campo) y
+            // daba un error confuso cuando un pfs posteaba otro usuario.
+            $actorId = (int) ($actor['id'] ?? 0);
+            $duenoEfectivo = (int) ($post['asignado_usuario_id'] ?? 0) ?: $actorId;
+            if (($actor['tipo'] ?? '') === 'pfs') $duenoEfectivo = $actorId;
+
             $lbl = self::requiereSolicitudFirmada(
                 (string) ($antes['status'] ?? ''),
                 $status,
-                (int) ($post['asignado_usuario_id'] ?? 0),
-                (int) ($actor['id'] ?? 0)
+                $duenoEfectivo,
+                $actorId,
+                (int) ($antes['usuario_stock_id'] ?? 0)
             );
             if ($lbl !== null) {
                 return $this->err("Para {$lbl} usa una Solicitud de movimiento (requiere firma y autorización). No se puede cambiar el estatus directo aquí.");
