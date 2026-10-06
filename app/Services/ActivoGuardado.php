@@ -128,12 +128,23 @@ class ActivoGuardado
      * de movimiento firmada?". Devuelve la etiqueta de la acción bloqueada, o
      * null si el cambio se puede hacer directo.
      *
+     * La firma protege que un equipo no cambie de MANOS sin que alguien lo
+     * autorice. Mover equipo que ya traes contigo a un lugar físico (una tienda
+     * o la bodega) no cambia de manos, así que no la pide.
+     *
      * Permitido sin firma:
-     *   · cualquier cosa → 'en_uso'  (instalar o mover entre tiendas)
+     *   · cualquier cosa → 'en_uso'     (instalar o mover entre tiendas)
+     *   · cualquier cosa → 'en_bodega'  (retiro a bodega: el equipo ya está en
+     *     manos del técnico; escanearlo en bodega mueve el registro y queda
+     *     asentado en la bitácora con quién y cuándo)
      *   · el estatus no cambia
      *   · 'en_uso' → 'asignado' cuando el destino es el propio actor
      *     (retiro directo a tu stock: la custodia no pasa a un tercero)
      *   · el activo no estaba bajo custodia (p. ej. un alta)
+     *
+     * Sigue exigiendo firma: traspasar a OTRO ingeniero, dar de baja y enviar a
+     * garantía. Quién puede tocar cada activo lo decide aparte
+     * Permisos::puedeEditarActivoConcreto().
      *
      * La llaman prepararStock() (edición) y MovimientoService::ejecutarReemplazo()
      * (el equipo que sale de un reemplazo).
@@ -146,13 +157,12 @@ class ActivoGuardado
         int $duenoNuevo,
         int $actorId
     ): ?string {
-        if ($stNuevo === 'en_uso') return null;
+        if ($stNuevo === 'en_uso' || $stNuevo === 'en_bodega') return null;
         if (!in_array($stAntes, ['asignado', 'en_uso', 'en_bodega'], true)) return null;
         if ($stNuevo === $stAntes) return null;
         if ($stNuevo === 'asignado' && $stAntes === 'en_uso' && $duenoNuevo === $actorId) return null;
 
         return [
-            'en_bodega' => 'devolver equipo a bodega',
             'asignado'  => 'traspasar equipo a otro ingeniero',
             'baja'      => 'dar de baja',
             'garantia'  => 'enviar a garantía',
