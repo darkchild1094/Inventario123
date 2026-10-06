@@ -5,13 +5,26 @@ namespace App\Helpers;
 /**
  * Permisos — Matriz de roles para femsa_assets
  *
- * admin       → todo, todas las plazas y negocios
- * coordinador → todo menos gestionar usuarios, solo sus plazas
- * pfs         → registra/visualiza solo su stock, puede editar su perfil, exportar su stock
- * ati         → registra activos en su stock, visualiza activos de su plaza, exportar excel de su plaza
+ * Qué puede tocar cada rol (el detalle vive en MODULOS_POR_ROL, que es la
+ * fuente única: de ahí salen el menú, la API y la app):
  *
- * El rol de campo se llama 'pfs' (antes 'fs'). La migración 026 renombró el
- * valor en la BD; aquí ya no debe aparecer 'fs' salvo compatibilidad de login.
+ *   pfs         Su stock y las tiendas donde trabaja. Hace movimientos en sitio
+ *               (instalar, retirar por daño, reemplazar) y transfiere equipo de
+ *               su stock a otra persona de uno en uno. Más Consulta.
+ *               NO ve Bodega.
+ *
+ *   ati         Lo mismo que pfs, más Bodega en SOLO LECTURA (sin botón de
+ *               agregar) y el stock de los ingenieros de su plaza, también en
+ *               solo lectura.
+ *
+ *   coordinador Lo mismo que ati, pero Bodega SÍ editable: es quien recibe y
+ *               entrega material. Ve el stock de sus ingenieros en lectura.
+ *
+ *   admin       Todos los módulos de todas las plazas, todo editable, más
+ *               Usuarios y el catálogo de modelos. Control total.
+ *
+ * El rol de campo se llama 'pfs' (antes 'fs'); la migración 026 renombró el
+ * valor en la BD.
  */
 class Permisos
 {
@@ -348,13 +361,15 @@ class Permisos
             ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => false],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
         ],
+        // pfs: lo suyo y las tiendas donde trabaja. NO ve Bodega — el equipo de
+        // bodega no es asunto suyo hasta que alguien se lo asigna, y para
+        // devolverlo usa la transferencia desde Mi Stock.
         'pfs' => [
             ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
             ['clave' => 'consulta',  'etiqueta' => 'Consulta',    'icono' => 'fa-barcode',             'editable' => false],
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
             ['clave' => 'rentec',    'etiqueta' => 'RENTEC',      'icono' => 'fa-arrows-rotate',       'editable' => true],
-            ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => false],
         ],
         'admin' => [
             ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
