@@ -380,6 +380,7 @@ class Permisos
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => true],
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
             ['clave' => 'usuarios',  'etiqueta' => 'Usuarios',    'icono' => 'fa-users-cog',           'editable' => true],
+            ['clave' => 'apk',       'etiqueta' => 'Actualizar app', 'icono' => 'fa-mobile-screen-button', 'editable' => true],
         ],
     ];
 

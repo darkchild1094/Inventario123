@@ -146,6 +146,9 @@ if ($controllerName === 'home' && $action === 'index'
 $rutasPublicas = [
     'auth' => ['mostrarLogin', 'login', 'logout'],
     'api'  => ['login'],
+    // Descarga del APK: un técnico la abre desde el celular por un enlace
+    // compartido (WhatsApp, etc.), sin cuenta en el panel web.
+    'apk'  => ['descargar'],
 ];
 
 $requiereAuth = !(
@@ -204,6 +207,10 @@ switch ($controllerName) {
 
     case 'solicitud':
         $controller = new \App\Controllers\SolicitudTrasladoController($db);
+        break;
+
+    case 'apk':
+        $controller = new \App\Controllers\ApkController($db);
         break;
 
     case 'dashboard':

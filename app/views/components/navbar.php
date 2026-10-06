@@ -130,6 +130,8 @@ $badgeColor = match ($tipo) {
                 $activo = $ctrl === 'consulta';
             elseif ($clave === 'usuarios'):
                 continue; // va en la sección Administración
+            elseif ($clave === 'apk'):
+                continue; // va en la sección Administración
             else:
                 $href = 'index.php?modulo=' . urlencode($clave);
                 $activo = $moduloAc === $clave;
@@ -162,6 +164,9 @@ $badgeColor = match ($tipo) {
             </a>
             <a class="<?= $ctrl === 'usuario' && $act !== 'perfil' ? 'active' : '' ?>" href="index.php?controller=usuario&action=index">
                 <i class="fas fa-users-cog"></i> Usuarios
+            </a>
+            <a class="<?= $ctrl === 'apk' ? 'active' : '' ?>" href="index.php?controller=apk&action=index">
+                <i class="fas fa-mobile-screen-button"></i> Actualizar app
             </a>
         <?php endif; ?>
     </nav>
