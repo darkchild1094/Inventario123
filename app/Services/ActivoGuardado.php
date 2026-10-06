@@ -128,22 +128,24 @@ class ActivoGuardado
      * de movimiento firmada?". Devuelve la etiqueta de la acción bloqueada, o
      * null si el cambio se puede hacer directo.
      *
-     * La firma protege que un equipo no cambie de MANOS sin que alguien lo
-     * autorice. Mover equipo que ya traes contigo a un lugar físico (una tienda
-     * o la bodega) no cambia de manos, así que no la pide.
+     * Lo único que protege esta regla es que un equipo no cambie de MANOS sin
+     * que la otra persona lo acepte. Moverlo de LUGAR —a una tienda, a la
+     * bodega— no cambia de manos y no pide nada: el movimiento queda en la
+     * bitácora con quién y cuándo, que es la trazabilidad que importa.
      *
-     * Permitido sin firma:
+     * Permitido directo:
      *   · cualquier cosa → 'en_uso'     (instalar o mover entre tiendas)
-     *   · cualquier cosa → 'en_bodega'  (retiro a bodega: el equipo ya está en
-     *     manos del técnico; escanearlo en bodega mueve el registro y queda
-     *     asentado en la bitácora con quién y cuándo)
-     *   · el estatus no cambia
+     *   · cualquier cosa → 'en_bodega'  (retiro a bodega)
+     *   · cualquier cosa → 'baja' | 'garantia'
      *   · 'en_uso' → 'asignado' cuando el destino es el propio actor
-     *     (retiro directo a tu stock: la custodia no pasa a un tercero)
+     *     (retiro a tu stock: la custodia no pasa a un tercero)
+     *   · 'asignado' → 'asignado' con el mismo dueño
      *   · el activo no estaba bajo custodia (p. ej. un alta)
      *
-     * Sigue exigiendo firma: traspasar a OTRO ingeniero, dar de baja y enviar a
-     * garantía. Quién puede tocar cada activo lo decide aparte
+     * Exige transferencia aceptada: entregar equipo a OTRA persona. Para eso
+     * están los endpoints transferirActivo / aceptarTransferencia.
+     *
+     * Quién puede tocar cada activo lo decide aparte
      * Permisos::puedeEditarActivoConcreto().
      *
      * La llaman prepararStock() (edición) y MovimientoService::ejecutarReemplazo()
@@ -167,7 +169,7 @@ class ActivoGuardado
         if ($stNuevo === 'asignado') {
             // OJO: aquí no basta con "el estatus no cambió". Un activo puede ir de
             // 'asignado' a 'asignado' y aun así cambiar de dueño, que es
-            // exactamente el traspaso que la firma debe cubrir. Antes se permitía
+            // exactamente el traspaso que hay que cubrir. Antes se permitía
             // porque la guarda sólo miraba el estatus.
             if ($stAntes === 'asignado' && $duenoNuevo > 0 && $duenoNuevo === $duenoAntes) {
                 return null; // sigue con el mismo ingeniero
@@ -175,16 +177,14 @@ class ActivoGuardado
             // Retiro directo de una tienda al stock personal de quien lo retira.
             if ($stAntes === 'en_uso' && $duenoNuevo === $actorId) return null;
 
-            return 'traspasar equipo a otro ingeniero';
+            return 'entregar equipo a otra persona';
         }
 
-        // baja | garantia: si ya estaba así, no hay cambio que autorizar.
-        if ($stNuevo === $stAntes) return null;
-
-        return [
-            'baja'     => 'dar de baja',
-            'garantia' => 'enviar a garantía',
-        ][$stNuevo] ?? null;
+        // Baja y garantía ya no piden autorización de nadie: son cambios de
+        // estatus directos, como instalar o mandar a bodega. Lo que queda
+        // protegido es únicamente el cambio de MANOS entre personas, que pasa
+        // por una transferencia que el receptor acepta.
+        return null;
     }
 
     // ── internos ─────────────────────────────────────────────────────
@@ -227,7 +227,10 @@ class ActivoGuardado
                 (int) ($antes['usuario_stock_id'] ?? 0)
             );
             if ($lbl !== null) {
-                return $this->err("Para {$lbl} usa una Solicitud de movimiento (requiere firma y autorización). No se puede cambiar el estatus directo aquí.");
+                return $this->err(
+                    "Para {$lbl} usa Transferir desde Mi Stock: el equipo cambia de manos cuando "
+                    . "la otra persona la acepta. No se puede reasignar directo aquí."
+                );
             }
         }
         $actorId = (int) ($actor['id'] ?? 0);

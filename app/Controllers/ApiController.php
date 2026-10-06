@@ -65,6 +65,7 @@ class ApiController
                 'puedeGestionarTiendas' => Permisos::puedeGestionarTiendas(),
                 'puedeGestionarModelos' => Permisos::puedeGestionarModelos(),
                 'puedeRecibirRentec'    => Permisos::puedeRecibirRentec(),
+                'puedeTransferir'       => Permisos::puedeTransferir(),
                 'puedeCrearSolicitudTraslado' => Permisos::puedeCrearSolicitudTraslado(),
                 'puedeAprobarTraslados' => Permisos::puedeAprobarTraslados(),
                 'puedeVerTraslados'     => Permisos::puedeVerTraslados(),
@@ -1240,7 +1241,185 @@ class ApiController
         $this->json(['success' => true, 'message' => "Modelo eliminado." . ($movidos ? " {$movidos} activos reasignados." : '')]);
     }
 
+    // ── Transferencia de equipo entre personas ───────────────────────────────
+    // Reemplaza las "solicitudes de traslado" con firma: el dueño manda equipo
+    // de su stock a otra persona y quien recibe lo acepta con un toque. Queda
+    // registrado quién aceptó y cuándo, que es el respaldo que de verdad
+    // importa — si falta un equipo, eso dice en manos de quién estaba.
+    //
+    // Se apoya en la tabla solicitud_traslado (destino='asignado') porque ya
+    // tiene las columnas exactas: origen, destino, estado, los activos y la
+    // fecha de resolución. Las columnas de firma quedan sin usar.
+
+    // POST ?action=transferirActivo   activos[]=, destino_usuario_id=, nota=
+    public function transferirActivo(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+
+        $yo       = Permisos::idUsuario();
+        $plazaId  = Permisos::plazaId();
+        $destUid  = (int) ($b['destino_usuario_id'] ?? 0);
+        $activos  = array_values(array_unique(array_map('intval', (array) ($b['activos'] ?? []))));
+        $nota     = trim((string) ($b['nota'] ?? ''));
+
+        if (!$activos) {
+            $this->json(['success' => false, 'message' => 'Elige al menos un equipo para transferir.'], 400);
+        }
+        if ($destUid <= 0 || $destUid === $yo) {
+            $this->json(['success' => false, 'message' => 'Elige a quién le vas a entregar el equipo.'], 400);
+        }
+
+        // Quien recibe tiene que ser alguien de tu plaza.
+        $um = new Usuario($this->db);
+        if (!$um->obtenerPorId($destUid) || !$um->perteneceAPlaza($destUid, $plazaId)) {
+            $this->json(['success' => false, 'message' => 'Esa persona no está en tu plaza.'], 400);
+        }
+
+        // Sólo se puede transferir lo que de verdad traes a tu nombre.
+        $mios = array_map('intval', array_column($this->activosAsignadosDe($yo), 'id'));
+        foreach ($activos as $aid) {
+            if (!in_array($aid, $mios, true)) {
+                $this->json([
+                    'success' => false,
+                    'message' => 'Hay equipo que ya no está en tu stock; vuelve a abrir la lista.',
+                ], 409);
+            }
+        }
+
+        $model = new SolicitudTraslado($this->db);
+        if ($model->activosEnSolicitudPendiente($activos)) {
+            $this->json(['success' => false, 'message' => 'Ese equipo ya está en otra transferencia pendiente.'], 409);
+        }
+
+        $id = $model->crear([
+            'destino'            => 'asignado',
+            'plaza_id'           => $plazaId,
+            'solicitante_id'     => $yo,
+            'origen_usuario_id'  => $yo,
+            'destino_usuario_id' => $destUid,
+            'nota'               => $nota,
+            'grupo_id'           => Movimiento::nuevoGrupoId(),
+            'activos'            => $activos,
+        ]);
+        if ($id <= 0) {
+            $this->json(['success' => false, 'message' => 'No se pudo crear la transferencia.'], 500);
+        }
+        $this->json([
+            'success' => true,
+            'id'      => $id,
+            'message' => 'Transferencia enviada. El equipo cambia de manos cuando la otra persona la acepte.',
+        ]);
+    }
+
+    // GET ?action=listarTransferencias
+    public function listarTransferencias(): void
+    {
+        $yo    = Permisos::idUsuario();
+        $model = new SolicitudTraslado($this->db);
+        $porAceptar = $model->transferenciasPorAceptar($yo);
+        $enviadas   = $model->transferenciasEnviadas($yo);
+
+        $conActivos = function (array $filas) use ($model, $yo): array {
+            return array_map(function ($s) use ($model, $yo) {
+                $s['activos']       = $model->activosDe((int) $s['id']);
+                $s['puedeAceptar']  = $s['estado'] === 'pendiente' && (int) $s['destino_usuario_id'] === $yo;
+                $s['puedeCancelar'] = $s['estado'] === 'pendiente' && (int) $s['origen_usuario_id'] === $yo;
+                return $s;
+            }, $filas);
+        };
+
+        $this->json([
+            'por_aceptar' => $conActivos($porAceptar),
+            'enviadas'    => $conActivos($enviadas),
+            'pendientes'  => count($porAceptar),
+        ]);
+    }
+
+    // GET ?action=contarTransferenciasPendientes
+    public function contarTransferenciasPendientes(): void
+    {
+        $n = count((new SolicitudTraslado($this->db))->transferenciasPorAceptar(Permisos::idUsuario()));
+        $this->json(['pendientes' => $n]);
+    }
+
+    // POST ?action=aceptarTransferencia   id=
+    public function aceptarTransferencia(): void
+    {
+        $this->requerirPost();
+        $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        $yo = Permisos::idUsuario();
+
+        $model = new SolicitudTraslado($this->db);
+        $t = $model->obtenerPorId($id);
+        if (!$t || $t['estado'] !== 'pendiente' || $t['destino'] !== 'asignado') {
+            $this->json(['success' => false, 'message' => 'Esa transferencia ya no está pendiente.'], 409);
+        }
+        if ((int) ($t['destino_usuario_id'] ?? 0) !== $yo) {
+            $this->json(['success' => false, 'message' => 'Esta transferencia no es para ti.'], 403);
+        }
+
+        try {
+            $this->db->beginTransaction();
+            if (!$model->marcarAceptada($id, $yo)) {
+                throw new \RuntimeException('La transferencia cambió de estado.');
+            }
+            // Mueve el equipo y deja el movimiento en la bitácora.
+            (new TrasladoService($this->db))->ejecutar($id, $yo);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            $this->json(['success' => false, 'message' => 'No se pudo aceptar: ' . $e->getMessage()], 500);
+        }
+        $this->json(['success' => true, 'message' => 'Equipo recibido. Ya aparece en tu stock.']);
+    }
+
+    // POST ?action=rechazarTransferencia   id=, motivo=
+    public function rechazarTransferencia(): void
+    {
+        $this->requerirPost();
+        $b      = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id     = (int) ($b['id'] ?? 0);
+        $motivo = trim((string) ($b['motivo'] ?? ''));
+        $yo     = Permisos::idUsuario();
+
+        $model = new SolicitudTraslado($this->db);
+        $t = $model->obtenerPorId($id);
+        if (!$t || $t['estado'] !== 'pendiente') {
+            $this->json(['success' => false, 'message' => 'Esa transferencia ya no está pendiente.'], 409);
+        }
+        if ((int) ($t['destino_usuario_id'] ?? 0) !== $yo) {
+            $this->json(['success' => false, 'message' => 'Esta transferencia no es para ti.'], 403);
+        }
+        if ($motivo === '') {
+            $this->json(['success' => false, 'message' => 'Dile por qué no la aceptas.'], 400);
+        }
+        if (!$model->marcarRechazada($id, $yo, $motivo)) {
+            $this->json(['success' => false, 'message' => 'No se pudo rechazar.'], 500);
+        }
+        $this->json(['success' => true, 'message' => 'Transferencia rechazada. El equipo sigue en el stock de quien la envió.']);
+    }
+
+    // POST ?action=cancelarTransferencia   id=
+    public function cancelarTransferencia(): void
+    {
+        $this->requerirPost();
+        $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        if (!(new SolicitudTraslado($this->db))->marcarCancelada($id, Permisos::idUsuario())) {
+            $this->json([
+                'success' => false,
+                'message' => 'No se pudo cancelar (sólo quien la envió, y sólo mientras siga pendiente).',
+            ], 400);
+        }
+        $this->json(['success' => true, 'message' => 'Transferencia cancelada.']);
+    }
+
     // ── Solicitudes de movimiento con firma ──────────────────────────────────
+    // OBSOLETO: lo reemplaza la transferencia de arriba. No se puede borrar
+    // todavía porque los APK ya instalados siguen llamando a estos endpoints;
+    // se quitan cuando todos los equipos estén en la versión nueva.
 
     // GET ?action=listarSolicitudes[&estado=pendiente]
     public function listarSolicitudes(): void

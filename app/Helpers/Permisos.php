@@ -231,27 +231,26 @@ class Permisos
         return in_array(self::tipo(), ['coordinador', 'admin'], true);
     }
 
-    // ── Solicitudes de movimiento con firma ──────────────────────────────────
-    // Todo cambio de dueño/estatus (salvo alta y instalación en tienda) pasa por
-    // una solicitud firmada. Cualquier rol puede crearlas.
+    // ── Transferencia de equipo entre personas ───────────────────────────────
+    // Lo único que ya no se puede hacer directo es entregarle equipo a otra
+    // persona: se manda y el que recibe lo acepta. Mover de lugar (tienda,
+    // bodega), dar de baja o enviar a garantía son cambios directos.
 
-    /** Todos los roles operativos pueden iniciar una solicitud de movimiento. */
-    public static function puedeCrearSolicitudTraslado(): bool
+    /** Cualquier rol operativo puede entregar equipo de su stock y recibirlo. */
+    public static function puedeTransferir(): bool
     {
         return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
     }
 
-    /** Coordinador y ATI aprueban solicitudes (según el destino); admin cualquiera. */
+    /** @deprecated Lo reemplaza puedeTransferir(). Vive mientras los APK viejos llamen a los endpoints de solicitudes. */
+    public static function puedeCrearSolicitudTraslado(): bool { return self::puedeTransferir(); }
+    /** @deprecated Igual que arriba. */
     public static function puedeAprobarTraslados(): bool
     {
         return in_array(self::tipo(), ['coordinador', 'ati', 'admin'], true);
     }
-
-    /** Ve la pantalla de Traslados: todos los roles operativos. */
-    public static function puedeVerTraslados(): bool
-    {
-        return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
-    }
+    /** @deprecated Igual que arriba. */
+    public static function puedeVerTraslados(): bool { return self::puedeTransferir(); }
 
     /**
      * Matriz de firma — ÚNICA fuente de verdad de "¿qué slot de firma le toca a

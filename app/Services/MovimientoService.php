@@ -175,7 +175,8 @@ class MovimientoService
         );
         if ($bloqueo !== null) {
             throw new \RuntimeException(
-                "El equipo que sale no se puede {$bloqueo} desde un reemplazo: usa una Solicitud de movimiento firmada."
+                "El equipo que sale no se puede {$bloqueo} desde un reemplazo: "
+                . "retíralo a tu stock y desde ahí usa Transferir."
             );
         }
 

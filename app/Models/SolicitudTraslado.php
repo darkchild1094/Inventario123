@@ -256,6 +256,55 @@ class SolicitudTraslado
         return $this->listar("WHERE s.estado = 'pendiente' AND (" . implode(' OR ', $cond) . ")", $params);
     }
 
+    /**
+     * Transferencias de equipo entre personas que a ESTE usuario le toca
+     * aceptar: alguien le mandó equipo de su stock y está esperando respuesta.
+     *
+     * No hay rol que decida nada aquí, a diferencia de las viejas solicitudes
+     * con firma: el único que puede aceptar es quien va a quedarse el equipo.
+     */
+    public function transferenciasPorAceptar(int $usuarioId): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT " . self::SELECT_CABECERA . "
+             FROM {$this->table} s " . self::JOINS_CABECERA . "
+             WHERE s.estado = 'pendiente'
+               AND s.destino = 'asignado'
+               AND s.destino_usuario_id = :uid
+             ORDER BY s.creado_en DESC"
+        );
+        $stmt->execute([':uid' => $usuarioId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Las que este usuario mandó y siguen esperando respuesta. */
+    public function transferenciasEnviadas(int $usuarioId): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT " . self::SELECT_CABECERA . "
+             FROM {$this->table} s " . self::JOINS_CABECERA . "
+             WHERE s.destino = 'asignado'
+               AND (s.origen_usuario_id = :uid OR s.solicitante_id = :uid2)
+             ORDER BY s.creado_en DESC
+             LIMIT 50"
+        );
+        $stmt->execute([':uid' => $usuarioId, ':uid2' => $usuarioId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Marca la transferencia como aceptada por quien recibe. */
+    public function marcarAceptada(int $id, int $usuarioId): bool
+    {
+        $stmt = $this->conn->prepare(
+            "UPDATE {$this->table}
+                SET estado = 'aprobada', aprobador_id = :uid, resuelto_en = CURRENT_TIMESTAMP,
+                    firmado_aprobador_en = CURRENT_TIMESTAMP
+              WHERE id = :id AND estado = 'pendiente' AND destino_usuario_id = :uid2"
+        );
+        $stmt->execute([':uid' => $usuarioId, ':id' => $id, ':uid2' => $usuarioId]);
+        return $stmt->rowCount() > 0;
+    }
+
     public function contarPendientesPorPlazas(array $plazaIds): int
     {
         $plazaIds = array_values(array_filter(array_map('intval', $plazaIds)));
