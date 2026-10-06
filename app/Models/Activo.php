@@ -275,6 +275,66 @@ class Activo
         ];
     }
 
+    /**
+     * Series que NO identifican a nada: se capturaron como texto libre y las
+     * comparte mucho equipo distinto, así que buscar por ellas daría falsos
+     * positivos. 'NO VISIBLE' la comparten 741 activos.
+     */
+    private const SERIES_NO_IDENTIFICAN = [
+        'NO VISIBLE', 'BODEGA', 'SWITCH', 'ROUTER', 'ENTRADA', 'ANTENA',
+        'CHECK OUT', 'CHECKAUT', 'PISO DE VENTA', 'PISO VTA', 'EPSON',
+        'SIN SERIE', 'N/A', 'NA',
+    ];
+
+    /**
+     * ¿Ya existe este equipo en el sistema? Busca por identificador, del más
+     * fuerte al más débil: num_activo (la placa de activo fijo) → código de
+     * barras → serie. Devuelve la fila enriquecida, o false.
+     *
+     * Sirve para no volver a dar de alta algo que ya está registrado: así un
+     * equipo que se recoge de una tienda y se escanea en bodega MUEVE el
+     * registro existente en vez de crear un segundo. Esa duplicación es lo que
+     * dejó 61 pares del mismo equipo apareciendo a la vez en tienda y en bodega.
+     *
+     * @param int|null $exceptoId id a ignorar (al editar, uno mismo)
+     */
+    public function buscarExistente(
+        ?string $serie,
+        ?string $codigoBarras,
+        ?string $numActivo,
+        ?int $exceptoId = null
+    ): array|false {
+        $serie        = self::limpiarCodigoBarras($serie);
+        $codigoBarras = self::limpiarCodigoBarras($codigoBarras);
+        $numActivo    = self::limpiarCodigoBarras($numActivo);
+
+        // La serie sólo sirve como identificador si de verdad identifica.
+        if ($serie !== null && in_array(mb_strtoupper($serie), self::SERIES_NO_IDENTIFICAN, true)) {
+            $serie = null;
+        }
+
+        foreach ([['num_activo', $numActivo], ['codigo_barras', $codigoBarras], ['serie', $serie]] as [$col, $valor]) {
+            if ($valor === null) continue;
+            $sql = "SELECT id FROM {$this->table} WHERE {$col} = :v";
+            $params = [':v' => $valor];
+            if ($exceptoId !== null) {
+                $sql .= ' AND id <> :excepto';
+                $params[':excepto'] = $exceptoId;
+            }
+            $st = $this->conn->prepare($sql . ' ORDER BY id LIMIT 1');
+            $st->execute($params);
+            $id = $st->fetchColumn();
+            if ($id) {
+                $fila = $this->obtenerPorId((int) $id);
+                if ($fila) {
+                    $fila['coincidio_por'] = $col;
+                    return $fila;
+                }
+            }
+        }
+        return false;
+    }
+
     public function obtenerPorId(int $id): array|false
     {
         $sql = "SELECT

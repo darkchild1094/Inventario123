@@ -471,6 +471,42 @@ class ApiController
             $this->json(['success' => false, 'message' => 'Debes indicar una plaza válida.'], 400);
         }
 
+        // ── El equipo ya existe → se MUEVE, no se duplica ────────────────────
+        // Un activo que se recoge de una tienda y se escanea en bodega tiene que
+        // cambiar de ubicación, no generar un segundo registro. Eso es lo que
+        // dejó 61 pares del mismo equipo apareciendo a la vez en tienda y en
+        // bodega. Si el identificador ya está en el sistema no se inserta: se
+        // responde 409 con el activo encontrado para que la app pregunte, y si
+        // el usuario confirma vuelve con mover_existente=1.
+        $activoModel = new Activo($this->db);
+        $existente = $activoModel->buscarExistente(
+            $datos['serie'] ?? null,
+            $datos['codigo_barras'] ?? null,
+            $datos['num_activo'] ?? null
+        );
+
+        if ($existente) {
+            if (!filter_var($_POST['mover_existente'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                $this->json([
+                    'success'      => false,
+                    'ya_existe'    => true,
+                    'coincidio_por' => $existente['coincidio_por'],
+                    'activo'       => $existente,
+                    'ubicacion'    => $this->ubicacionCorta($existente),
+                    'message'      => sprintf(
+                        'Este equipo ya está registrado (coincide el %s) y hoy está en %s. '
+                        . '¿Lo mueves a la nueva ubicación en vez de darlo de alta otra vez?',
+                        ['num_activo' => 'N° de activo', 'codigo_barras' => 'código de barras', 'serie' => 'número de serie'][$existente['coincidio_por']],
+                        $this->ubicacionCorta($existente)
+                    ),
+                ], 409);
+            }
+
+            // Confirmado: se reusa actualizarActivo, que ya valida permisos
+            // sobre el activo concreto y aplica la regla de la firma.
+            $this->moverExistente($existente, $datos, $plazaId);
+        }
+
         $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, [], ['foto_equipo_salida']);
         $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
         unset($fotos['foto_equipo_salida']);
@@ -523,6 +559,65 @@ class ApiController
         } else {
             $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo actualizar el activo.'], 400);
         }
+    }
+
+    /**
+     * Mueve un activo que YA existe a la ubicación que traía el alta, en vez de
+     * insertar un duplicado. Pasa por ActivoGuardado::actualizar, así que
+     * respeta la regla de la firma (devolver a bodega o traspasar a otro
+     * ingeniero sigue exigiendo Solicitud) y deja el movimiento en la bitácora.
+     *
+     * No toca num_activo ni la serie del registro existente: la identidad del
+     * equipo es la que ya estaba, lo único que cambia es dónde está.
+     */
+    private function moverExistente(array $existente, array $datos, int $plazaId): never
+    {
+        $id = (int) $existente['id'];
+
+        if (!Permisos::puedeEditarActivoConcreto($existente)) {
+            $this->json([
+                'success'   => false,
+                'ya_existe' => true,
+                'activo'    => $existente,
+                'message'   => 'Este equipo ya existe pero está fuera de tu alcance ('
+                    . $this->ubicacionCorta($existente) . '), así que no lo puedes mover.',
+            ], 403);
+        }
+
+        // Se conserva la identidad del registro existente; del alta sólo se
+        // toma el destino (estatus, tienda de uso, procedencia).
+        $mover = [
+            'serie'                 => $existente['serie'],
+            'codigo_barras'         => $existente['codigo_barras'],
+            'num_activo'            => $existente['num_activo'],
+            'modelo_id'             => $datos['modelo_id'] ?: $existente['modelo_id'],
+            'status'                => $datos['status'],
+            'tienda_uso_id'         => $datos['tienda_uso_id'] ?? null,
+            'procedencia_tienda_id' => $datos['procedencia_tienda_id']
+                ?? ($existente['tienda_uso_id'] ?? $existente['procedencia_tienda_id'] ?? null),
+        ];
+
+        // Las fotos se procesan aquí y no antes a propósito: si el alta se queda
+        // en el 409 sin confirmar, no se escribió ningún archivo que limpiar.
+        foreach (ImageHelper::procesarYSubirImagenes(
+            ROOT_PATH . '/public/uploads', $id, $existente, ['foto_equipo_salida']
+        ) as $campo => $valor) {
+            if ($campo !== 'foto_equipo_salida' && $valor !== null) $mover[$campo] = $valor;
+        }
+
+        $post = array_merge($_POST, ['plaza_id' => $plazaId]);
+        $res  = (new ActivoGuardado($this->db))->actualizar($id, $mover, $existente, $post, $this->actorSesion());
+
+        if ($res['ok']) {
+            $this->json([
+                'success' => true,
+                'id'      => $id,
+                'movido'  => true,
+                'message' => 'El equipo ya estaba registrado: se movió a la nueva ubicación en vez de duplicarlo.',
+            ]);
+        }
+        $this->json(['success' => false, 'ya_existe' => true, 'activo' => $existente,
+                     'message' => $res['error'] ?? 'No se pudo mover el equipo existente.'], 400);
     }
 
     /**
