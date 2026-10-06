@@ -40,20 +40,52 @@ class Usuario
         );
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) $row['plaza_ids'] = $this->plazaIdsDe($id);
+        return $row;
+    }
+
+    /**
+     * TODAS las plazas asignadas al usuario (usuario_plaza), no sólo la
+     * principal de `usuario.plaza_id`.
+     *
+     * Hace falta porque guardarPlazas() borra y reinserta: un formulario que
+     * premarque sólo la plaza principal y guarde, le quita al usuario el resto
+     * de sus plazas sin avisar. El coordinador de Valles trabaja OXXO y BARA;
+     * editarlo con la lista incompleta lo dejaba sin una de las dos.
+     *
+     * @return int[]
+     */
+    public function plazaIdsDe(int $usuarioId): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT plaza_id FROM usuario_plaza WHERE usuario_id = :id ORDER BY plaza_id"
+        );
+        $stmt->execute([':id' => $usuarioId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     public function obtenerTodos(): array
     {
+        // plaza_ids viene con TODAS las plazas asignadas: el formulario de
+        // edición las necesita para premarcarlas, porque guardarPlazas() borra
+        // y reinserta y guardar con la lista incompleta se las quita.
         $stmt = $this->conn->prepare(
             "SELECT u.id, u.nombre, u.email, u.foto, u.plaza_id, u.tipo,
-                    p.nombre AS plaza_nombre
+                    p.nombre AS plaza_nombre,
+                    (SELECT GROUP_CONCAT(up.plaza_id ORDER BY up.plaza_id)
+                       FROM usuario_plaza up WHERE up.usuario_id = u.id) AS plazas_csv
              FROM {$this->tabla} u
              LEFT JOIN plaza p ON u.plaza_id = p.id
              ORDER BY u.nombre"
         );
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(function (array $u): array {
+            $csv = (string) ($u['plazas_csv'] ?? '');
+            unset($u['plazas_csv']);
+            $u['plaza_ids'] = $csv === '' ? [] : array_map('intval', explode(',', $csv));
+            return $u;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**
