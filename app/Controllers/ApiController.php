@@ -73,7 +73,8 @@ class ApiController
                 'plazasIds'             => Permisos::plazasIds(),
             ],
             // Navegación por módulos (fuente única: Permisos::modulos()).
-            'modulos' => Permisos::modulos(),
+            // modulosApp() excluye los que son solo del panel web (ej. 'apk').
+            'modulos' => Permisos::modulosApp(),
             // Compat con los APK ya instalados (navegación por "vista"). NO se
             // puede borrar hasta que todos los equipos estén en la versión que
             // navega sólo por 'modulo': un teléfono sin actualizar se queda sin
@@ -100,7 +101,7 @@ class ApiController
         // Conteo por módulo visible (para las tarjetas del dashboard).
         $activoModel = new Activo($this->db);
         $porModulo = [];
-        foreach (Permisos::modulos() as $m) {
+        foreach (Permisos::modulosApp() as $m) {
             $clave = $m['clave'];
             if (in_array($clave, ['dashboard', 'consulta', 'usuarios'], true)) continue;
             $porModulo[$clave] = $activoModel->resumen(Permisos::filtrosModulo($clave))['total'];

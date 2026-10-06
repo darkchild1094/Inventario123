@@ -390,6 +390,26 @@ class Permisos
         return self::MODULOS_POR_ROL[self::tipo()] ?? [];
     }
 
+    /**
+     * Módulos que SOLO existen en el panel web, sin pantalla equivalente en
+     * la app Android (ej. 'apk': subir el instalador desde una computadora no
+     * tiene sentido en el celular). modulos() los sigue trayendo para que el
+     * menú web los muestre; esto es lo que de verdad hay que mandarle a la
+     * app — si no se filtran, el admin ve en el celular un módulo que al
+     * abrirlo cae en el listado genérico de activos (no hay pantalla para
+     * 'apk'), mostrando TODOS los activos del sistema sin ningún filtro.
+     */
+    private const MODULOS_SOLO_WEB = ['apk'];
+
+    /** modulos(), sin los que son exclusivos del panel web. Lo que ve la app. */
+    public static function modulosApp(): array
+    {
+        return array_values(array_filter(
+            self::modulos(),
+            fn($m) => !in_array($m['clave'], self::MODULOS_SOLO_WEB, true)
+        ));
+    }
+
     /** ¿El rol en sesión puede ver este módulo? */
     public static function moduloPermitido(string $modulo): bool
     {

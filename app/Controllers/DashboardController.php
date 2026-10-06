@@ -39,7 +39,10 @@ class DashboardController
         $porModulo = [];
         foreach ($modulos as $m) {
             $clave = $m['clave'];
-            if (in_array($clave, ['dashboard', 'consulta', 'usuarios'], true)) continue;
+            // apk no es un módulo de activos: no tiene sentido contarle 'activos', y
+            // sin este continue caía en el 'default' de filtrosModulo() y mostraba el
+            // total de TODOS los activos del sistema en su tarjeta.
+            if (in_array($clave, ['dashboard', 'consulta', 'usuarios', 'apk'], true)) continue;
             $porModulo[$clave] = $activoModel->resumen(Permisos::filtrosModulo($clave))['total'];
         }
 

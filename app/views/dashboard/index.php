@@ -71,6 +71,7 @@ $maxPlaza  = max(1, ...array_map(fn($d) => $d['n'], $resumen['por_plaza'] ?: [['
             if ($clave === 'dashboard') continue;
             if ($clave === 'consulta') { $href = 'index.php?controller=consulta&action=index'; }
             elseif ($clave === 'usuarios') { $href = 'index.php?controller=usuario&action=index'; }
+            elseif ($clave === 'apk') { $href = 'index.php?controller=apk&action=index'; }
             else { $href = 'index.php?modulo=' . urlencode($clave); }
             $cnt = $porModulo[$clave] ?? null;
         ?>
