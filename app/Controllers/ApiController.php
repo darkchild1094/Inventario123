@@ -1251,7 +1251,12 @@ class ApiController
     // tiene las columnas exactas: origen, destino, estado, los activos y la
     // fecha de resolución. Las columnas de firma quedan sin usar.
 
-    // POST ?action=transferirActivo   activos[]=, destino_usuario_id=, nota=
+    // POST ?action=transferirActivo
+    //   activos[]=, destino_usuario_id=, nota=, origen=mi_stock|bodega, bodega_id=
+    //
+    // Se puede entregar equipo de dos sitios: del propio stock (cualquier rol) o
+    // de una bodega (sólo quien la tiene editable, o sea coordinador y admin —
+    // el ATI la ve en lectura y no puede sacar material de ahí).
     public function transferirActivo(): void
     {
         $this->requerirPost();
@@ -1262,6 +1267,8 @@ class ApiController
         $destUid  = (int) ($b['destino_usuario_id'] ?? 0);
         $activos  = array_values(array_unique(array_map('intval', (array) ($b['activos'] ?? []))));
         $nota     = trim((string) ($b['nota'] ?? ''));
+        $origen   = ($b['origen'] ?? 'mi_stock') === 'bodega' ? 'bodega' : 'mi_stock';
+        $bodegaId = (int) ($b['bodega_id'] ?? 0);
 
         if (!$activos) {
             $this->json(['success' => false, 'message' => 'Elige al menos un equipo para transferir.'], 400);
@@ -1276,14 +1283,42 @@ class ApiController
             $this->json(['success' => false, 'message' => 'Esa persona no está en tu plaza.'], 400);
         }
 
-        // Sólo se puede transferir lo que de verdad traes a tu nombre.
-        $mios = array_map('intval', array_column($this->activosAsignadosDe($yo), 'id'));
-        foreach ($activos as $aid) {
-            if (!in_array($aid, $mios, true)) {
+        // ── De dónde sale el equipo: sólo se transfiere lo que de verdad está ahí
+        $datos = [
+            'destino'            => 'asignado',
+            'plaza_id'           => $plazaId,
+            'solicitante_id'     => $yo,
+            'destino_usuario_id' => $destUid,
+            'nota'               => $nota,
+            'grupo_id'           => Movimiento::nuevoGrupoId(),
+            'activos'            => $activos,
+        ];
+
+        if ($origen === 'bodega') {
+            if (!Permisos::moduloEditable('bodega')) {
                 $this->json([
                     'success' => false,
-                    'message' => 'Hay equipo que ya no está en tu stock; vuelve a abrir la lista.',
-                ], 409);
+                    'message' => 'Sacar equipo de bodega es cosa de un coordinador.',
+                ], 403);
+            }
+            if ($bodegaId <= 0 || !$this->puedeOperarBodega($bodegaId)) {
+                $this->json(['success' => false, 'message' => 'Bodega inválida.'], 400);
+            }
+            $validos = array_map('intval', array_column(
+                (new Activo($this->db))->obtenerTodosFiltrado(
+                    ['bodega_id' => $bodegaId, 'status' => 'en_bodega'], 1, 5000
+                )['activos'] ?? [], 'id'));
+            $fuera = 'Hay equipo que ya no está en esa bodega; vuelve a abrir la lista.';
+            $datos['origen_bodega_id'] = $bodegaId;
+        } else {
+            $validos = array_map('intval', array_column($this->activosAsignadosDe($yo), 'id'));
+            $fuera = 'Hay equipo que ya no está en tu stock; vuelve a abrir la lista.';
+            $datos['origen_usuario_id'] = $yo;
+        }
+
+        foreach ($activos as $aid) {
+            if (!in_array($aid, $validos, true)) {
+                $this->json(['success' => false, 'message' => $fuera], 409);
             }
         }
 
@@ -1292,16 +1327,7 @@ class ApiController
             $this->json(['success' => false, 'message' => 'Ese equipo ya está en otra transferencia pendiente.'], 409);
         }
 
-        $id = $model->crear([
-            'destino'            => 'asignado',
-            'plaza_id'           => $plazaId,
-            'solicitante_id'     => $yo,
-            'origen_usuario_id'  => $yo,
-            'destino_usuario_id' => $destUid,
-            'nota'               => $nota,
-            'grupo_id'           => Movimiento::nuevoGrupoId(),
-            'activos'            => $activos,
-        ]);
+        $id = $model->crear($datos);
         if ($id <= 0) {
             $this->json(['success' => false, 'message' => 'No se pudo crear la transferencia.'], 500);
         }
