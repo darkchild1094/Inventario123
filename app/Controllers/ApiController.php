@@ -64,6 +64,7 @@ class ApiController
                 'puedeVerHistorial'     => Permisos::puedeVerHistorial(),
                 'puedeGestionarTiendas' => Permisos::puedeGestionarTiendas(),
                 'puedeGestionarModelos' => Permisos::puedeGestionarModelos(),
+                'puedeRecibirRentec'    => Permisos::puedeRecibirRentec(),
                 'puedeCrearSolicitudTraslado' => Permisos::puedeCrearSolicitudTraslado(),
                 'puedeAprobarTraslados' => Permisos::puedeAprobarTraslados(),
                 'puedeVerTraslados'     => Permisos::puedeVerTraslados(),
@@ -481,6 +482,20 @@ class ApiController
         $plazaId = $this->resolverPlazaId((int) ($_POST['negocio_id'] ?? 0));
         if ($plazaId <= 0) {
             $this->json(['success' => false, 'message' => 'Debes indicar una plaza válida.'], 400);
+        }
+
+        // Recibir equipo nuevo en bodega bajo un folio RENTEC es la entrada del
+        // material al sistema: sólo coordinador y admin. Instalar lo ya recibido
+        // sí lo puede hacer cualquier rol del módulo. Se valida aquí y no sólo
+        // en la app para que no dependa de la versión instalada.
+        if (!empty($_POST['proyecto_rentec_id'])
+            && ($datos['status'] ?? '') === 'en_bodega'
+            && !Permisos::puedeRecibirRentec()) {
+            $this->json([
+                'success' => false,
+                'message' => 'Recibir equipo de un proyecto RENTEC es cosa de un coordinador. '
+                    . 'Tú sí puedes instalar lo que ya esté recibido.',
+            ], 403);
         }
 
         // ── El equipo ya existe → se MUEVE, no se duplica ────────────────────
@@ -1737,8 +1752,51 @@ class ApiController
         if ($nombre === '') {
             $this->json(['success' => false, 'message' => 'Dale un nombre al proyecto.'], 400);
         }
-        $creado = (new ProyectoRentec($this->db))->crear($nombre, Permisos::idUsuario());
+        // La plaza queda grabada en el proyecto para que todo su equipo lo vea
+        // desde el primer momento, sin esperar a que tenga movimientos.
+        $creado = (new ProyectoRentec($this->db))->crear($nombre, Permisos::idUsuario(), Permisos::plazaId());
         $this->json(['success' => true, 'id' => $creado['id'], 'folio' => $creado['folio']]);
+    }
+
+    // POST ?action=rentecEliminar  id=
+    // Sólo folios sin huella: con activos o movimientos encima no se borra
+    // (las claves foráneas son RESTRICT y perderíamos la trazabilidad).
+    public function rentecEliminar(): void
+    {
+        $this->requerirPost();
+        $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+
+        $model = new ProyectoRentec($this->db);
+        $cab   = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeVerRentec($cab, $model)) {
+            $this->json(['success' => false, 'message' => 'Proyecto no encontrado.'], 404);
+        }
+        // Lo borra quien lo creó, o un coordinador/admin de su plaza.
+        if ((int) $cab['usuario_id'] !== Permisos::idUsuario() && !Permisos::puedeRecibirRentec()) {
+            $this->json([
+                'success' => false,
+                'message' => 'Sólo quien creó el proyecto, o un coordinador, puede borrarlo.',
+            ], 403);
+        }
+
+        $act = $model->actividad($id);
+        if ($act['activos'] > 0 || $act['movimientos'] > 0) {
+            $this->json([
+                'success' => false,
+                'message' => sprintf(
+                    'Este proyecto ya tiene movimiento (%d equipo(s) y %d registro(s) en la bitácora), '
+                    . 'así que no se puede borrar sin perder el rastro. Ciérralo en vez de borrarlo.',
+                    $act['activos'], $act['movimientos']
+                ),
+                'actividad' => $act,
+            ], 409);
+        }
+
+        if (!$model->eliminar($id)) {
+            $this->json(['success' => false, 'message' => 'No se pudo borrar el proyecto.'], 500);
+        }
+        $this->json(['success' => true, 'message' => 'Proyecto borrado.']);
     }
 
     // GET ?action=rentecDetalle&id=

@@ -207,6 +207,17 @@ class Permisos
         return self::esAdmin();
     }
 
+    /**
+     * Puede RECIBIR equipo en bodega bajo un folio RENTEC. Es la entrada del
+     * equipo nuevo al sistema, así que queda en manos de coordinador y admin.
+     * Instalar lo que ya se recibió lo puede hacer cualquier rol del módulo:
+     * el folio es compartido por toda la plaza y el trabajo se reparte.
+     */
+    public static function puedeRecibirRentec(): bool
+    {
+        return in_array(self::tipo(), ['coordinador', 'admin'], true);
+    }
+
     // ── Solicitudes de movimiento con firma ──────────────────────────────────
     // Todo cambio de dueño/estatus (salvo alta y instalación en tienda) pasa por
     // una solicitud firmada. Cualquier rol puede crearlas.

@@ -41,10 +41,22 @@ class ProyectoRentec
             ))
         )";
 
-    public function crear(string $nombre, int $usuarioId): array
+    /**
+     * Crea el folio. La plaza se graba al momento (migración 032) para que el
+     * proyecto sea visible para todo su equipo desde el primer instante, sin
+     * esperar a que tenga movimientos.
+     */
+    public function crear(string $nombre, int $usuarioId, int $plazaId): array
     {
-        $stmt = $this->conn->prepare("INSERT INTO proyecto_rentec (nombre, usuario_id) VALUES (:nombre, :usuario_id)");
-        $stmt->execute([':nombre' => $nombre, ':usuario_id' => $usuarioId]);
+        $stmt = $this->conn->prepare(
+            "INSERT INTO proyecto_rentec (nombre, usuario_id, plaza_id)
+             VALUES (:nombre, :usuario_id, :plaza_id)"
+        );
+        $stmt->execute([
+            ':nombre'     => $nombre,
+            ':usuario_id' => $usuarioId,
+            ':plaza_id'   => $plazaId > 0 ? $plazaId : null,
+        ]);
         $id = (int) $this->conn->lastInsertId();
 
         $folio = 'RENTEC-' . str_pad((string) $id, 4, '0', STR_PAD_LEFT);
@@ -71,14 +83,25 @@ class ProyectoRentec
 
         $params = [];
         if ($plazaIds !== null) {
-            $ph = [];
+            // Dos juegos de placeholders con nombres distintos: los prepares
+            // nativos (EMULATE_PREPARES=false) no permiten reutilizar el mismo
+            // :nombre en dos sitios de la consulta.
+            $phPlaza = [];
+            $phMov   = [];
             foreach (array_values($plazaIds) as $i => $pid) {
-                $key = ":p{$i}";
-                $ph[] = $key;
-                $params[$key] = (int) $pid;
+                $phPlaza[] = ":pp{$i}";
+                $phMov[]   = ":pm{$i}";
+                $params[":pp{$i}"] = (int) $pid;
+                $params[":pm{$i}"] = (int) $pid;
             }
-            $condPlazas = $ph
-                ? "EXISTS (SELECT 1 FROM movimiento m2 WHERE m2.proyecto_rentec_id = pr.id AND m2.plaza_id IN (" . implode(',', $ph) . "))"
+            // La plaza del proyecto manda (migración 032). Se conserva la
+            // condición por movimientos para las filas viejas que quedaron sin
+            // plaza, y la del creador como red de seguridad.
+            $condPlazas = $phPlaza
+                ? "pr.plaza_id IN (" . implode(',', $phPlaza) . ")
+                   OR EXISTS (SELECT 1 FROM movimiento m2
+                              WHERE m2.proyecto_rentec_id = pr.id
+                                AND m2.plaza_id IN (" . implode(',', $phMov) . "))"
                 : '0';
             $sql .= " WHERE (pr.usuario_id = :usuario_id OR {$condPlazas})";
             $params[':usuario_id'] = $usuarioId;
@@ -175,5 +198,33 @@ class ProyectoRentec
     {
         $stmt = $this->conn->prepare("UPDATE proyecto_rentec SET estado = 'cerrado', cerrado_en = NOW() WHERE id = :id");
         return $stmt->execute([':id' => $id]);
+    }
+
+    /**
+     * Cuánta huella dejó el proyecto. Si hay algo, no se puede borrar: las dos
+     * claves foráneas que lo apuntan (activo.proyecto_rentec_id y
+     * movimiento.proyecto_rentec_id) son ON DELETE RESTRICT, y con razón —
+     * borrar el folio dejaría equipo y bitácora sin el proyecto que los explica.
+     *
+     * @return array{activos:int, movimientos:int}
+     */
+    public function actividad(int $id): array
+    {
+        $st = $this->conn->prepare(
+            "SELECT (SELECT COUNT(*) FROM activo     WHERE proyecto_rentec_id = :a) AS activos,
+                    (SELECT COUNT(*) FROM movimiento WHERE proyecto_rentec_id = :b) AS movimientos"
+        );
+        $st->execute([':a' => $id, ':b' => $id]);
+        $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        return [
+            'activos'     => (int) ($r['activos'] ?? 0),
+            'movimientos' => (int) ($r['movimientos'] ?? 0),
+        ];
+    }
+
+    /** Borra el folio. Sólo tiene sentido si actividad() salió en cero. */
+    public function eliminar(int $id): bool
+    {
+        return $this->conn->prepare("DELETE FROM proyecto_rentec WHERE id = :id")->execute([':id' => $id]);
     }
 }
