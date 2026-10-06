@@ -211,9 +211,10 @@ class MovimientoService
             'tienda_uso_id'         => null,
             'stock_id'              => $stockSaleId,
         ];
-        // Foto del equipo retirado, si el formulario la envió.
-        if (!empty($destino['foto_equipo'])) {
-            $datosSale['foto_equipo'] = (string) $destino['foto_equipo'];
+        // Fotos del equipo retirado, las que el formulario haya enviado. Se
+        // escriben en las mismas columnas que las de cualquier activo.
+        foreach (['foto_equipo', 'foto_serie', 'foto_activo'] as $campo) {
+            if (!empty($destino[$campo])) $datosSale[$campo] = (string) $destino[$campo];
         }
         // Si el UPDATE falla hay que abortar: antes se ignoraba el retorno y se
         // registraba un movimiento de un traslado que nunca ocurrió.

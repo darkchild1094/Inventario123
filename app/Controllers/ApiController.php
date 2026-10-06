@@ -25,6 +25,18 @@ use App\Helpers\Permisos;
 
 class ApiController
 {
+    /**
+     * Fotos del equipo que SALE en un reemplazo: nombre de la parte multipart
+     * que manda la app → clave con la que ActivoGuardado la pasa al servicio.
+     * Son las mismas tres que lleva cualquier activo (equipo, serie y código de
+     * barras): el que sale merece el mismo respaldo fotográfico que el que entra.
+     */
+    private const FOTOS_SALIDA = [
+        'foto_equipo_salida' => 'salida_foto_equipo',
+        'foto_serie_salida'  => 'salida_foto_serie',
+        'foto_activo_salida' => 'salida_foto_activo',
+    ];
+
     private $db;
 
     public function __construct($db)
@@ -507,13 +519,12 @@ class ApiController
             $this->moverExistente($existente, $datos, $plazaId);
         }
 
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', null, [], ['foto_equipo_salida']);
-        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
-        unset($fotos['foto_equipo_salida']);
+        $fotos = ImageHelper::procesarYSubirImagenes(
+            ROOT_PATH . '/public/uploads', null, [], array_keys(self::FOTOS_SALIDA)
+        );
+        $post = array_merge($_POST, ['plaza_id' => $plazaId], $this->extraerFotosSalida($fotos));
         $datos = array_merge($datos, $fotos);
 
-        $post = array_merge($_POST, ['plaza_id' => $plazaId]);
-        if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         $res  = (new ActivoGuardado($this->db))->crear($datos, $post, $this->actorSesion());
 
         if ($res['ok']) {
@@ -525,8 +536,11 @@ class ApiController
             $this->json(['success' => true, 'message' => 'Activo ya registrado.', 'id' => $ganador, 'duplicado' => true]);
         }
         // Las imágenes se subieron antes del INSERT; si el alta no cuajó hay que
-        // retirarlas o quedan huérfanas en /uploads para siempre.
-        $this->descartarImagenes(array_merge($fotos, ['salida' => $fotoSalida]));
+        // retirarlas (las del que entra y las del que sale) o quedan huérfanas.
+        $this->descartarImagenes(array_merge(
+            $fotos,
+            array_intersect_key($post, array_flip(self::FOTOS_SALIDA))
+        ));
         $this->json(['success' => false, 'message' => $res['error'] ?? 'No se pudo registrar el activo.'], 400);
     }
 
@@ -543,15 +557,18 @@ class ApiController
 
         $datos = $this->datosActivoPost();
 
-        $fotos = \App\Helpers\ImageHelper::procesarYSubirImagenes(ROOT_PATH . '/public/uploads', $id, $antes ?: [], ['foto_equipo_salida']);
-        $fotoSalida = $fotos['foto_equipo_salida'] ?? null;
-        unset($fotos['foto_equipo_salida']);
+        $fotos = ImageHelper::procesarYSubirImagenes(
+            ROOT_PATH . '/public/uploads', $id, $antes ?: [], array_keys(self::FOTOS_SALIDA)
+        );
+        $post = array_merge(
+            $_POST,
+            ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())],
+            $this->extraerFotosSalida($fotos)
+        );
         foreach ($fotos as $key => $val) {
             if ($val !== null) $datos[$key] = $val;
         }
 
-        $post  = array_merge($_POST, ['plaza_id' => (int) ($antes['plaza_id'] ?? Permisos::plazaId())]);
-        if ($fotoSalida) $post['salida_foto_equipo'] = $fotoSalida;
         $res   = (new ActivoGuardado($this->db))->actualizar($id, $datos, $antes, $post, $this->actorSesion());
 
         if ($res['ok']) {
@@ -618,6 +635,21 @@ class ApiController
         }
         $this->json(['success' => false, 'ya_existe' => true, 'activo' => $existente,
                      'message' => $res['error'] ?? 'No se pudo mover el equipo existente.'], 400);
+    }
+
+    /**
+     * Saca de $fotos las que pertenecen al equipo que sale (las quita de ahí por
+     * referencia, para que no se apliquen al que entra) y las devuelve con la
+     * clave que espera ActivoGuardado::procesarReemplazo().
+     */
+    private function extraerFotosSalida(array &$fotos): array
+    {
+        $salida = [];
+        foreach (self::FOTOS_SALIDA as $parte => $clave) {
+            if (!empty($fotos[$parte])) $salida[$clave] = $fotos[$parte];
+            unset($fotos[$parte]);
+        }
+        return $salida;
     }
 
     /**

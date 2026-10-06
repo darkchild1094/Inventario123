@@ -325,9 +325,15 @@ class ActivoGuardado
         if (array_key_exists('salida_num_activo', $post)) {
             $destino['num_activo'] = (string) $post['salida_num_activo'];
         }
-        // Foto del equipo que sale (ya procesada por el controlador → nombre de archivo).
-        if (!empty($post['salida_foto_equipo'])) {
-            $destino['foto_equipo'] = (string) $post['salida_foto_equipo'];
+        // Fotos del equipo que sale (ya procesadas por el controlador → nombre de
+        // archivo). Son las mismas tres que lleva el que entra: equipo, serie y
+        // código de barras. Antes solo viajaba la del equipo.
+        foreach ([
+            'salida_foto_equipo' => 'foto_equipo',
+            'salida_foto_serie'  => 'foto_serie',
+            'salida_foto_activo' => 'foto_activo',
+        ] as $origen => $campo) {
+            if (!empty($post[$origen])) $destino[$campo] = (string) $post[$origen];
         }
         $this->mov->ejecutarReemplazo($entra, $reemplazaId, $destino, $actorId, $motivo, $this->proyectoRentecId($post));
     }
