@@ -433,7 +433,15 @@ class Activo
         $campos = [
             'serie                 = :serie',
             'codigo_barras         = :codigo_barras',
-            'num_activo            = :num_activo',
+            // num_activo es la placa de activo fijo de FEMSA: la identidad del
+            // equipo ante auditoría. Es de ESCRITURA ÚNICA — si el activo ya
+            // tiene una, ninguna ruta de la API la cambia ni la borra nunca;
+            // sólo se puede llenar cuando está vacía. Antes esta columna se
+            // sobrescribía en cada UPDATE, así que un cliente que no mandara el
+            // campo (la app lo tiene oculto en el formulario) la dejaba en NULL
+            // y la placa se perdía sin rastro. Para corregir una placa ya
+            // puesta: a mano en la base de datos.
+            'num_activo            = COALESCE(NULLIF(num_activo, \'\'), :num_activo)',
             'modelo_id             = :modelo_id',
             'status                = :status',
             'procedencia_tienda_id = :procedencia_tienda_id',
