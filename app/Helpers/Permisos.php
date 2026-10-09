@@ -453,7 +453,9 @@ class Permisos
             'tiendas'   => array_merge(self::scopePlazas(), ['solo_tienda' => true]),
             'bodega'    => array_merge(self::scopePlazas(), ['solo_bodega' => true]),
             'mi_stock'  => ['stock_usuario_id' => self::idUsuario()],
-            'stock_pfs' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'pfs']),
+            // El módulo trata igual a pfs, coordinador y admin (ver
+            // Usuario::obtenerStockPersonalModuloPfs) — nunca a otro ati.
+            'stock_pfs' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => ['pfs', 'coordinador', 'admin']]),
             'ati'       => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'ati']),
             'rentec'    => array_merge(self::scopePlazas(), ['solo_rentec' => true]),
             default     => self::filtrosScope(),
