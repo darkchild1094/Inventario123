@@ -1845,7 +1845,7 @@ class ApiController
     {
         if (!Permisos::moduloPermitido('stock_pfs')) { $this->json([]); return; }
         $plazas = Permisos::esAdmin() ? null : Permisos::misPlazas();
-        $this->json((new Usuario($this->db))->obtenerPfsConStock($plazas));
+        $this->json((new Usuario($this->db))->obtenerStockPersonalModuloPfs($plazas, Permisos::idUsuario()));
     }
 
     // GET ?action=inventarioStockListar&stock_usuario_id= — histórico (por mes).

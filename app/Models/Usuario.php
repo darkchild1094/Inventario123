@@ -126,19 +126,31 @@ class Usuario
     }
 
     /**
-     * PFS con 1+ activos registrados a su nombre (cualquier plaza donde
+     * Usuarios con 1+ activos registrados a su nombre (cualquier plaza donde
      * tengan stock), con el conteo — landing del módulo "Stock PFS".
+     *
+     * El módulo se llama "Stock PFS" pero en él se trata igual al pfs, al
+     * coordinador y al admin: el ATI ve ahí el stock del coordinador y del
+     * admin (no tiene módulo propio para eso), y entre coordinador y admin
+     * se ven el uno al otro — cada uno de ellos ve también a los pfs. Lo
+     * único que nunca aparece aquí es el stock de OTRO ati (ese no tiene
+     * landing: cada ati solo ve el suyo, en "Mi Stock"). El propio usuario
+     * en sesión se excluye de la lista: a sí mismo ya se ve en "Mi Stock".
+     *
      * $plazaIds null = sin restricción (admin); [] = ninguna.
      */
-    public function obtenerPfsConStock(?array $plazaIds = null): array
+    public function obtenerStockPersonalModuloPfs(?array $plazaIds, int $idActual): array
     {
-        $where  = "u.tipo = 'pfs'";
-        $params = [];
+        $where  = "u.tipo IN ('pfs', 'coordinador', 'admin') AND u.id != :yo";
+        $params = [':yo' => $idActual];
         if ($plazaIds !== null) {
             if (empty($plazaIds)) return [];
-            $marcadores = implode(',', array_fill(0, count($plazaIds), '?'));
-            $where .= " AND s.plaza_id IN ($marcadores)";
-            $params = array_map('intval', $plazaIds);
+            $marcadores = [];
+            foreach ($plazaIds as $i => $pid) {
+                $marcadores[] = ":pl{$i}";
+                $params[":pl{$i}"] = (int) $pid;
+            }
+            $where .= ' AND s.plaza_id IN (' . implode(',', $marcadores) . ')';
         }
 
         $stmt = $this->conn->prepare(
@@ -152,7 +164,7 @@ class Usuario
              WHERE {$where}
              GROUP BY u.id
              HAVING activos_count >= 1
-             ORDER BY u.nombre"
+             ORDER BY FIELD(u.tipo,'admin','coordinador','pfs'), u.nombre"
         );
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
