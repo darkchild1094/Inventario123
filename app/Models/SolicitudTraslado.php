@@ -228,29 +228,38 @@ class SolicitudTraslado
         // asignado -> el ingeniero que recibe
         $cond[] = "(s.destino = 'asignado' AND s.destino_usuario_id = :u)";
 
-        $filtroPlaza = '';
-        if (!$esAdmin) {
-            $plazaIds = array_values(array_filter(array_map('intval', $plazaIds)));
-            if (!$plazaIds) {
-                $plazaIds = [-1];
-            }
-            $ph = [];
-            foreach ($plazaIds as $i => $pid) {
-                $ph[] = ":pl{$i}";
-                $params[":pl{$i}"] = $pid;
-            }
-            $filtroPlaza = ' AND s.plaza_id IN (' . implode(',', $ph) . ')';
+        $plazaIdsFiltradas = $esAdmin ? [] : array_values(array_filter(array_map('intval', $plazaIds)));
+        if (!$esAdmin && !$plazaIdsFiltradas) {
+            $plazaIdsFiltradas = [-1];
         }
 
+        // El filtro de plaza se repite hasta en 4 condiciones del mismo WHERE
+        // (en_bodega, garantía x2, baja): con prepares nativas
+        // (EMULATE_PREPARES=false) un mismo nombre de placeholder no puede
+        // repetirse en la consulta, así que cada aparición necesita su propio
+        // juego de marcadores aunque los valores sean los mismos.
+        $contadorFiltro = 0;
+        $filtroPlaza = function () use (&$contadorFiltro, &$params, $esAdmin, $plazaIdsFiltradas): string {
+            if ($esAdmin) return '';
+            $sufijo = $contadorFiltro++;
+            $ph = [];
+            foreach ($plazaIdsFiltradas as $i => $pid) {
+                $marca = ":pl{$sufijo}_{$i}";
+                $ph[] = $marca;
+                $params[$marca] = $pid;
+            }
+            return ' AND s.plaza_id IN (' . implode(',', $ph) . ')';
+        };
+
         if ($esCoord || $esAdmin) {
-            $cond[] = "(s.destino = 'en_bodega'{$filtroPlaza})";
+            $cond[] = "(s.destino = 'en_bodega'" . $filtroPlaza() . ")";
             // garantía: el slot de coordinador aún sin firmar
-            $cond[] = "(s.destino = 'garantia' AND s.aprobador2_id IS NULL{$filtroPlaza})";
+            $cond[] = "(s.destino = 'garantia' AND s.aprobador2_id IS NULL" . $filtroPlaza() . ")";
         }
         if ($esAti || $esAdmin) {
-            $cond[] = "(s.destino = 'baja'{$filtroPlaza})";
+            $cond[] = "(s.destino = 'baja'" . $filtroPlaza() . ")";
             // garantía: el slot de ATI aún sin firmar
-            $cond[] = "(s.destino = 'garantia' AND s.aprobador_id IS NULL{$filtroPlaza})";
+            $cond[] = "(s.destino = 'garantia' AND s.aprobador_id IS NULL" . $filtroPlaza() . ")";
         }
 
         return $this->listar("WHERE s.estado = 'pendiente' AND (" . implode(' OR ', $cond) . ")", $params);
