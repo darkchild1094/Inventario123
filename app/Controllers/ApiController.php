@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\Activo;
+use App\Models\AppBuild;
 use App\Models\Usuario;
 use App\Models\Dispositivo;
 use App\Models\Modelo;
@@ -147,6 +148,29 @@ class ApiController
         }
 
         $this->json($salida);
+    }
+
+    // GET ?action=obtenerUltimaVersionApp
+    // Para la sección "Actualizar app" del dashboard — visible a TODOS los
+    // roles, no solo admin (quien sube el APK sigue siendo solo admin, desde
+    // el panel web; esto es de solo lectura). Compara contra lo que ya trae
+    // instalado la app (versionCode) para decidir si hay algo más nuevo.
+    public function obtenerUltimaVersionApp(): void
+    {
+        $ultima = (new AppBuild($this->db))->ultima();
+        if (!$ultima) { $this->json(['hay_version' => false]); return; }
+
+        $base = (isset($_SERVER['HTTPS']) ? 'https://' : 'http://') . $_SERVER['HTTP_HOST']
+            . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+
+        $this->json([
+            'hay_version'  => true,
+            'version_code' => (int) $ultima['version_code'],
+            'version_name' => $ultima['version_name'],
+            'notas'        => $ultima['notas'],
+            'creado_en'    => $ultima['creado_en'],
+            'url_descarga' => "{$base}/index.php?controller=apk&action=descargar",
+        ]);
     }
 
     // ── Activos ───────────────────────────────────────────────────────────────
