@@ -252,6 +252,9 @@ class Permisos
     /** @deprecated Igual que arriba. */
     public static function puedeVerTraslados(): bool { return self::puedeTransferir(); }
 
+    /** "Enviar" (Bodega↔Mi stock↔usuario) — inmediato, sin aceptación. Mismo alcance que puedeTransferir(). */
+    public static function puedeEnviar(): bool { return self::puedeTransferir(); }
+
     /**
      * Matriz de firma — ÚNICA fuente de verdad de "¿qué slot de firma le toca a
      * este usuario en esta solicitud?". Devuelve 1, 2 o null (no le toca).
