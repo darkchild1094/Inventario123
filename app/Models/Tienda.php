@@ -100,6 +100,7 @@ class Tienda
         }
 
         $sql = "SELECT t.id, t.cr_tienda, t.nombre, t.plaza_id, t.ati_usuario_id,
+                       t.ultimo_inv_fecha, t.ultimo_inv_encontrados, t.ultimo_inv_no_encontrados,
                        p.nombre AS plaza_nombre,
                        r.nombre AS region_nombre,
                        n.nombre AS negocio_nombre,
@@ -124,6 +125,7 @@ class Tienda
     {
         $stmt = $this->conn->prepare(
             "SELECT t.id, t.cr_tienda, t.nombre, t.coordenadas, t.plaza_id, t.ati_usuario_id,
+                    t.ultimo_inv_fecha, t.ultimo_inv_encontrados, t.ultimo_inv_no_encontrados,
                     p.nombre AS plaza_nombre,
                     r.nombre AS region_nombre,
                     n.nombre AS negocio_nombre,

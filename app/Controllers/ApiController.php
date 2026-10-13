@@ -1653,6 +1653,29 @@ class ApiController
         $this->json(['success' => true]);
     }
 
+    // POST ?action=inventarioTiendaAgregarNuevo  id= (del inventario), activo_id=
+    // FAB "Agregar activo" del modo inventario: el activo ya se creó por el alta
+    // normal (guardarActivo, status=en_uso en esta tienda); esto lo engancha al
+    // checklist abierto, ya marcado encontrado=1 ("NUEVO" en la UI).
+    public function inventarioTiendaAgregarNuevo(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $invId    = (int) ($b['id'] ?? 0);
+        $activoId = (int) ($b['activo_id'] ?? 0);
+
+        $model = new InventarioTienda($this->db);
+        $cab   = $model->obtenerCabecera($invId);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        if ($activoId <= 0) {
+            $this->json(['success' => false, 'message' => 'Activo inválido.'], 400);
+        }
+        $model->agregarNuevo($invId, $activoId, Permisos::idUsuario());
+        $this->json(['success' => true]);
+    }
+
     // POST ?action=inventarioTiendaCerrar  id=
     public function inventarioTiendaCerrar(): void
     {
