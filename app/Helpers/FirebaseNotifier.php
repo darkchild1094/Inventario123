@@ -17,14 +17,17 @@ namespace App\Helpers;
  * en un try/catch silencioso que a lo más deja un log.
  *
  * El hosting compartido (alwaysdata) falla el handshake TLS hacia Google con
- * una tasa alta (gnutls_handshake(): "non-properly terminated", curl errno
- * 35 — confirmado probando en vivo: ronda el 70-80% de las peticiones,
- * sin relación con HTTP/1.1 vs HTTP/2 ni con forzar TLS 1.2, así que es la
- * compilación de cURL/GnuTLS del hosting, no algo corregible desde PHP). Con
- * una tasa de fallo así, un solo reintento no basta: curlConReintento()
- * insiste varias veces antes de darse por vencido — cada intento es barato
- * (falla rápido, sin esperar el timeout completo) y el costo de insistir de
- * más es mucho menor que el de un aviso "inmediato" que nunca llega.
+ * una tasa alta e irregular (gnutls_handshake(): "non-properly terminated",
+ * curl errno 35 — confirmado probando en vivo, sin relación con HTTP/1.1 vs
+ * HTTP/2 ni con forzar TLS 1.2: es la compilación de cURL/GnuTLS del
+ * hosting, no algo corregible desde PHP, y ni insistiendo 5 veces se llega
+ * a una tasa de éxito confiable). Por eso este espejo desde el backend es
+ * deliberadamente RÁPIDO y de mejor esfuerzo (2 intentos cortos, no más):
+ * el canal que de verdad se da por confiable es que la propia app también
+ * escriba este mismo nodo con el SDK oficial de Firebase justo al recibir
+ * la respuesta de la API (ver ApiController::enviarActivos, campo
+ * 'avisos') — ese no sufre este problema de TLS. Insistir más aquí solo
+ * alargaría la respuesta de la API sin mejorar la fiabilidad real.
  */
 class FirebaseNotifier
 {
@@ -49,23 +52,23 @@ class FirebaseNotifier
     }
 
     /**
-     * Un curl_exec con varios reintentos inmediatos si la conexión falla a
-     * nivel de transporte (errno != 0 → nunca llegó a haber respuesta HTTP,
-     * así que no hay ambigüedad de reintentar una escritura a medias: nada
-     * se aplicó a medias en Firebase si no hubo respuesta). Con ~75% de
-     * fallo por intento, 5 intentos dejan la probabilidad de fallo total
-     * en ~0.75⁵ ≈ 24%; cada intento falla en milisegundos (no espera el
-     * timeout completo), así que el costo de insistir es bajo.
+     * Un curl_exec con 1 reintento inmediato si la conexión falla a nivel de
+     * transporte (errno != 0 → nunca llegó a haber respuesta HTTP, así que
+     * no hay ambigüedad de reintentar una escritura a medias: nada se
+     * aplicó a medias en Firebase si no hubo respuesta). Deliberadamente
+     * corto (2 intentos, timeout bajo) — ver docblock de la clase: este
+     * espejo es de mejor esfuerzo, no el canal confiable, así que no vale
+     * la pena alargar la respuesta de la API insistiendo más.
      */
     private static function curlConReintento(string $url, string $metodo, ?string $body): array
     {
-        for ($intento = 1; $intento <= 5; $intento++) {
+        for ($intento = 1; $intento <= 2; $intento++) {
             $ch = curl_init($url);
             $opts = [
                 CURLOPT_CUSTOMREQUEST  => $metodo,
                 CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT        => 5,
+                CURLOPT_TIMEOUT        => 3,
             ];
             if ($body !== null) $opts[CURLOPT_POSTFIELDS] = $body;
             curl_setopt_array($ch, $opts);
