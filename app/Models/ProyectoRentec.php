@@ -167,7 +167,8 @@ class ProyectoRentec
                     m.activo_id, m.activo_relacionado_id, m.usuario_id, u.nombre AS usuario_nombre,
                     a.serie AS serie_entra, a.codigo_barras AS codigo_entra,
                     mo.nombre AS modelo_nombre, mar.nombre AS marca_nombre, di.nombre AS dispositivo_nombre,
-                    sale.serie AS serie_sale, sale.codigo_barras AS codigo_sale, sale.num_activo AS num_activo_sale
+                    sale.serie AS serie_sale, sale.codigo_barras AS codigo_sale, sale.num_activo AS num_activo_sale,
+                    dsale.nombre AS dispositivo_sale_nombre
              FROM movimiento m
              JOIN activo a ON a.id = m.activo_id
              LEFT JOIN modelo mo ON mo.id = a.modelo_id
@@ -176,6 +177,8 @@ class ProyectoRentec
              LEFT JOIN tienda t ON t.id = m.tienda_id
              LEFT JOIN usuario u ON u.id = m.usuario_id
              LEFT JOIN activo sale ON sale.id = m.activo_relacionado_id
+             LEFT JOIN modelo mosale ON mosale.id = sale.modelo_id
+             LEFT JOIN dispositivo dsale ON dsale.id = mosale.dispositivo_id
              WHERE m.proyecto_rentec_id = :id AND " . self::COND_INSTALADO . "
              ORDER BY m.creado_en DESC"
         );
@@ -230,6 +233,56 @@ class ProyectoRentec
             'activos'     => (int) ($r['activos'] ?? 0),
             'movimientos' => (int) ($r['movimientos'] ?? 0),
         ];
+    }
+
+    /** Cuántos equipos del proyecto ya se instalaron (movimiento de instalación real). */
+    public function totalInstalados(int $id): int
+    {
+        $st = $this->conn->prepare(
+            "SELECT COUNT(DISTINCT m.activo_id) FROM movimiento m
+             WHERE m.proyecto_rentec_id = :id AND " . self::COND_INSTALADO
+        );
+        $st->execute([':id' => $id]);
+        return (int) $st->fetchColumn();
+    }
+
+    /**
+     * Borra el folio junto con sus activos PENDIENTES (en bodega, sin instalar).
+     * Quien llama debe haber comprobado que totalInstalados() es 0. La
+     * bitácora no se pierde: los movimientos se desligan del folio
+     * (proyecto_rentec_id = NULL) y cada activo borrado deja su 'eliminacion'.
+     *
+     * @return array{ok:bool, borrados:int}
+     */
+    public function eliminarConPendientes(int $id, int $actorId): array
+    {
+        $svc = new \App\Services\MovimientoService($this->conn);
+        $act = new Activo($this->conn);
+        $this->conn->beginTransaction();
+        try {
+            $st = $this->conn->prepare("SELECT id FROM activo WHERE proyecto_rentec_id = :id");
+            $st->execute([':id' => $id]);
+            $ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+
+            $this->conn->prepare("UPDATE movimiento SET proyecto_rentec_id = NULL WHERE proyecto_rentec_id = :id")
+                ->execute([':id' => $id]);
+
+            $n = 0;
+            foreach ($ids as $aid) {
+                $a = $act->obtenerPorId($aid);
+                if (!$a) continue;
+                $svc->registrarEliminacion($a, $actorId);
+                $act->eliminar($aid);
+                $n++;
+            }
+
+            $this->eliminar($id);
+            $this->conn->commit();
+            return ['ok' => true, 'borrados' => $n];
+        } catch (\Throwable $e) {
+            if ($this->conn->inTransaction()) $this->conn->rollBack();
+            return ['ok' => false, 'borrados' => 0];
+        }
     }
 
     /** Borra el folio. Sólo tiene sentido si actividad() salió en cero. */

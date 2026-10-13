@@ -1486,13 +1486,17 @@ class ApiController
         $this->json(array_values($out));
     }
 
-    // GET ?action=stockPfsUsuarios — landing del módulo "Stock PFS": lista de
-    // ingenieros PFS que tienen 1 o más activos registrados a su nombre.
-    public function stockPfsUsuarios(): void
+    // GET ?action=stockUsuarios&plaza_id= — módulo "Stock usuarios": todos los
+    // usuarios de la plaza (cualquier rol) con su stock personal. Solo lectura.
+    public function stockUsuarios(): void
     {
-        if (!Permisos::moduloPermitido('stock_pfs')) { $this->json([]); return; }
-        $plazas = Permisos::esAdmin() ? null : Permisos::misPlazas();
-        $this->json((new Usuario($this->db))->obtenerStockPersonalModuloPfs($plazas, Permisos::idUsuario()));
+        if (!Permisos::moduloPermitido('stock_usuarios')) { $this->json([]); return; }
+        $plazaId = (int) ($_GET['plaza_id'] ?? 0);
+        if ($plazaId <= 0) { $this->json([]); return; }
+        if (!Permisos::esAdmin() && !in_array($plazaId, Permisos::misPlazas(), true)) {
+            $this->json(['success' => false, 'message' => 'Esa plaza no está en tu alcance.'], 403);
+        }
+        $this->json((new Usuario($this->db))->stockDePlaza($plazaId));
     }
 
     // GET ?action=inventarioStockListar&stock_usuario_id= — histórico (por mes).
@@ -1775,8 +1779,8 @@ class ApiController
     }
 
     // POST ?action=rentecEliminar  id=
-    // Sólo folios sin huella: con activos o movimientos encima no se borra
-    // (las claves foráneas son RESTRICT y perderíamos la trazabilidad).
+    // Borra el folio y, en cascada, sus activos pendientes en bodega. Si ya hay
+    // equipo instalado se rechaza (409): se finaliza en vez de borrar.
     public function rentecEliminar(): void
     {
         $this->requerirPost();
@@ -1796,20 +1800,23 @@ class ApiController
             ], 403);
         }
 
-        $act = $model->actividad($id);
-        if ($act['activos'] > 0 || $act['movimientos'] > 0) {
+        // Con equipo ya instalado no se borra (se perdería el rastro): se finaliza.
+        // Los activos pendientes en bodega sí se borran en cascada con el folio.
+        $instalados = $model->totalInstalados($id);
+        if ($instalados > 0) {
             $this->json([
                 'success' => false,
                 'message' => sprintf(
-                    'Este proyecto ya tiene movimiento (%d equipo(s) y %d registro(s) en la bitácora), '
-                    . 'así que no se puede borrar sin perder el rastro. Ciérralo en vez de borrarlo.',
-                    $act['activos'], $act['movimientos']
+                    'Este proyecto ya tiene %d equipo(s) instalado(s), así que no se puede borrar '
+                    . 'sin perder el rastro. Finalízalo en vez de borrarlo.',
+                    $instalados
                 ),
-                'actividad' => $act,
+                'actividad' => $model->actividad($id),
             ], 409);
         }
 
-        if (!$model->eliminar($id)) {
+        $r = $model->eliminarConPendientes($id, Permisos::idUsuario());
+        if (!$r['ok']) {
             $this->json(['success' => false, 'message' => 'No se pudo borrar el proyecto.'], 500);
         }
         $this->json(['success' => true, 'message' => 'Proyecto borrado.']);

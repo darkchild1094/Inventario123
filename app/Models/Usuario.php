@@ -146,48 +146,50 @@ class Usuario
     }
 
     /**
-     * Usuarios con 1+ activos registrados a su nombre (cualquier plaza donde
-     * tengan stock), con el conteo — landing del módulo "Stock PFS".
+     * "Stock usuarios": TODOS los usuarios de la plaza (admin, coordinador,
+     * pfs, ati) con los activos de su stock personal. Solo lectura.
      *
-     * El módulo se llama "Stock PFS" pero en él se trata igual al pfs, al
-     * coordinador y al admin: el ATI ve ahí el stock del coordinador y del
-     * admin (no tiene módulo propio para eso), y entre coordinador y admin
-     * se ven el uno al otro — cada uno de ellos ve también a los pfs. Lo
-     * único que nunca aparece aquí es el stock de OTRO ati (ese no tiene
-     * landing: cada ati solo ve el suyo, en "Mi Stock"). El propio usuario
-     * en sesión se excluye de la lista: a sí mismo ya se ve en "Mi Stock".
-     *
-     * $plazaIds null = sin restricción (admin); [] = ninguna.
+     * @return array<int,array> usuario + `activos` (tipo, modelo, serie, AF) + `activos_count`
      */
-    public function obtenerStockPersonalModuloPfs(?array $plazaIds, int $idActual): array
+    public function stockDePlaza(int $plazaId): array
     {
-        $where  = "u.tipo IN ('pfs', 'coordinador', 'admin') AND u.id != :yo";
-        $params = [':yo' => $idActual];
-        if ($plazaIds !== null) {
-            if (empty($plazaIds)) return [];
-            $marcadores = [];
-            foreach ($plazaIds as $i => $pid) {
-                $marcadores[] = ":pl{$i}";
-                $params[":pl{$i}"] = (int) $pid;
-            }
-            $where .= ' AND s.plaza_id IN (' . implode(',', $marcadores) . ')';
+        $usuarios = $this->obtenerPorPlaza($plazaId);
+        if (!$usuarios) return [];
+
+        $ids = array_map(fn($u) => (int) $u['id'], $usuarios);
+        $ph  = implode(',', array_fill(0, count($ids), '?'));
+        $st  = $this->conn->prepare(
+            "SELECT s.usuario_id, a.id, a.serie, a.num_activo,
+                    d.nombre AS dispositivo_nombre, mo.nombre AS modelo_nombre
+             FROM stock s
+             JOIN activo a ON a.stock_id = s.id
+             LEFT JOIN modelo mo ON a.modelo_id = mo.id
+             LEFT JOIN dispositivo d ON mo.dispositivo_id = d.id
+             WHERE s.tipo = 'usuario' AND s.usuario_id IN ({$ph})
+             ORDER BY d.nombre, mo.nombre, a.id"
+        );
+        $st->execute($ids);
+        $porUsuario = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $porUsuario[(int) $r['usuario_id']][] = [
+                'id'         => (int) $r['id'],
+                'tipo'       => $r['dispositivo_nombre'],
+                'modelo'     => $r['modelo_nombre'],
+                'serie'      => $r['serie'],
+                'num_activo' => $r['num_activo'],
+            ];
         }
 
-        $stmt = $this->conn->prepare(
-            "SELECT u.id, u.nombre, u.email, u.foto, u.plaza_id, u.tipo,
-                    p.nombre AS plaza_nombre,
-                    COUNT(a.id) AS activos_count
-             FROM {$this->tabla} u
-             LEFT JOIN plaza p ON u.plaza_id = p.id
-             JOIN stock s ON s.tipo = 'usuario' AND s.usuario_id = u.id
-             JOIN activo a ON a.stock_id = s.id
-             WHERE {$where}
-             GROUP BY u.id
-             HAVING activos_count >= 1
-             ORDER BY FIELD(u.tipo,'admin','coordinador','pfs'), u.nombre"
-        );
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $orden = ['admin' => 0, 'coordinador' => 1, 'pfs' => 2, 'ati' => 3];
+        foreach ($usuarios as &$u) {
+            $u['activos']       = $porUsuario[(int) $u['id']] ?? [];
+            $u['activos_count'] = count($u['activos']);
+            $u['foto']          = null;
+        }
+        unset($u);
+        usort($usuarios, fn($x, $y) =>
+            ($orden[$x['tipo']] ?? 9) <=> ($orden[$y['tipo']] ?? 9) ?: strcmp($x['nombre'], $y['nombre']));
+        return $usuarios;
     }
 
     public function obtenerPlazas(int $usuarioId): array

@@ -353,6 +353,7 @@ class Permisos
             ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => true],
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
+            ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
         ],
         'ati' => [
@@ -363,6 +364,7 @@ class Permisos
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => false],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
+            ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
         ],
         // pfs: lo suyo y las tiendas donde trabaja. NO ve Bodega — el equipo de
@@ -384,6 +386,7 @@ class Permisos
             ['clave' => 'rentec',    'etiqueta' => 'RENTEC',      'icono' => 'fa-arrows-rotate',       'editable' => true],
             ['clave' => 'ati',       'etiqueta' => 'ATI',         'icono' => 'fa-user-gear',           'editable' => true],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => true],
+            ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
             ['clave' => 'usuarios',  'etiqueta' => 'Usuarios',    'icono' => 'fa-users-cog',           'editable' => true],
@@ -406,7 +409,7 @@ class Permisos
      * abrirlo cae en el listado genérico de activos (no hay pantalla para
      * 'apk'), mostrando TODOS los activos del sistema sin ningún filtro.
      */
-    private const MODULOS_SOLO_WEB = ['apk'];
+    private const MODULOS_SOLO_WEB = ['apk', 'stock_pfs', 'ati'];
 
     /** modulos(), sin los que son exclusivos del panel web. Lo que ve la app. */
     public static function modulosApp(): array
@@ -423,7 +426,7 @@ class Permisos
      * panel web no tiene vista equivalente). Sin filtrarlos, el navbar web
      * mostraría un link roto (controller inexistente).
      */
-    private const MODULOS_SOLO_APP = ['movimientos'];
+    private const MODULOS_SOLO_APP = ['movimientos', 'stock_usuarios'];
 
     /** modulos(), sin los que son exclusivos de la app. Lo que ve el panel web. */
     public static function modulosWeb(): array
@@ -481,6 +484,7 @@ class Permisos
             // Usuario::obtenerStockPersonalModuloPfs) — nunca a otro ati.
             'stock_pfs' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => ['pfs', 'coordinador', 'admin']]),
             'ati'       => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'ati']),
+            'stock_usuarios' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => ['admin', 'coordinador', 'pfs', 'ati']]),
             'rentec'    => array_merge(self::scopePlazas(), ['solo_rentec' => true]),
             default     => self::filtrosScope(),
         };

@@ -160,7 +160,7 @@ class ExportController
                 $modo = 'bodega';
                 foreach ($activos as $a) $grupos[$this->claveUbicacion($a)][] = $a;
                 break;
-            default: // mi_stock | stock_pfs | ati → stock personal, por ingeniero
+            default: // mi_stock | stock_usuarios | stock_pfs | ati → stock personal, por ingeniero
                 $modo = 'usuario';
                 foreach ($activos as $a) $grupos[$this->claveUsuario($a)][] = $a;
                 break;
