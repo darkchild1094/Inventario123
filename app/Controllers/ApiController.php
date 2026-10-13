@@ -1840,6 +1840,10 @@ class ApiController
             'usuario_id' => $_GET['usuario_id'] ?? null,
             'desde'      => $_GET['desde']      ?? null,
             'hasta'      => $_GET['hasta']      ?? null,
+            // Pestañas del módulo "Movimientos" (bodega|usuario|tienda) — ver
+            // Movimiento::listar(). Nada que ver con Permisos::puedeVerHistorial
+            // que sigue siendo lo que gatea esta acción.
+            'lugar_tipo' => $_GET['lugar_tipo'] ?? null,
         ], fn($v) => $v !== null && $v !== ''));
 
         $pagina    = max(1, (int) ($_GET['pagina']     ?? 1));

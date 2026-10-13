@@ -229,6 +229,13 @@ class Movimiento
             $where .= ' AND m.usuario_id = :usuario_id';
             $params[':usuario_id'] = (int) $filtros['usuario_id'];
         }
+        // Pestañas del módulo "Movimientos": aparece si su origen O destino es
+        // de ese tipo de lugar (bodega/usuario/tienda) — ver stock.tipo.
+        if (!empty($filtros['lugar_tipo']) && in_array($filtros['lugar_tipo'], ['bodega', 'usuario', 'tienda'], true)) {
+            $where .= ' AND (so.tipo = :lugar_a OR sn.tipo = :lugar_b)';
+            $params[':lugar_a'] = $filtros['lugar_tipo'];
+            $params[':lugar_b'] = $filtros['lugar_tipo'];
+        }
         if (!empty($filtros['desde'])) {
             $where .= ' AND m.creado_en >= :desde';
             $params[':desde'] = $filtros['desde'] . ' 00:00:00';
