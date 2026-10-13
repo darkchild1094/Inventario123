@@ -353,6 +353,7 @@ class Permisos
             ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => true],
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
+            ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
         ],
         'ati' => [
             ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
@@ -362,6 +363,7 @@ class Permisos
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => false],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
+            ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
         ],
         // pfs: lo suyo y las tiendas donde trabaja. NO ve Bodega — el equipo de
         // bodega no es asunto suyo hasta que alguien se lo asigna, y para
@@ -372,6 +374,7 @@ class Permisos
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
             ['clave' => 'rentec',    'etiqueta' => 'RENTEC',      'icono' => 'fa-arrows-rotate',       'editable' => true],
+            ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
         ],
         'admin' => [
             ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
@@ -382,6 +385,7 @@ class Permisos
             ['clave' => 'ati',       'etiqueta' => 'ATI',         'icono' => 'fa-user-gear',           'editable' => true],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => true],
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
+            ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
             ['clave' => 'usuarios',  'etiqueta' => 'Usuarios',    'icono' => 'fa-users-cog',           'editable' => true],
             ['clave' => 'apk',       'etiqueta' => 'Actualizar app', 'icono' => 'fa-mobile-screen-button', 'editable' => true],
         ],
@@ -410,6 +414,23 @@ class Permisos
         return array_values(array_filter(
             self::modulos(),
             fn($m) => !in_array($m['clave'], self::MODULOS_SOLO_WEB, true)
+        ));
+    }
+
+    /**
+     * Al revés de MODULOS_SOLO_WEB: pantallas que solo existen en la app
+     * Android (ej. 'movimientos', línea de tiempo nueva del rediseño — el
+     * panel web no tiene vista equivalente). Sin filtrarlos, el navbar web
+     * mostraría un link roto (controller inexistente).
+     */
+    private const MODULOS_SOLO_APP = ['movimientos'];
+
+    /** modulos(), sin los que son exclusivos de la app. Lo que ve el panel web. */
+    public static function modulosWeb(): array
+    {
+        return array_values(array_filter(
+            self::modulos(),
+            fn($m) => !in_array($m['clave'], self::MODULOS_SOLO_APP, true)
         ));
     }
 

@@ -119,7 +119,7 @@ $badgeColor = match ($tipo) {
     <nav class="app-nav">
         <?php
         $moduloAc = $_GET['modulo'] ?? '';
-        $modulos  = \App\Helpers\Permisos::modulos();
+        $modulos  = \App\Helpers\Permisos::modulosWeb();
         foreach ($modulos as $m):
             $clave = $m['clave'];
             if ($clave === 'dashboard'):
