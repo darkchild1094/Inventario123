@@ -1731,9 +1731,28 @@ class ApiController
         if ($nombre === '') {
             $this->json(['success' => false, 'message' => 'Dale un nombre al proyecto.'], 400);
         }
+
+        // Plaza: elegible en el nuevo diseño (antes era siempre la del actor).
+        // Admin puede crear en cualquiera; el resto, solo en las suyas.
+        $plazaId = (int) ($b['plaza_id'] ?? 0);
+        if ($plazaId <= 0) {
+            $plazaId = Permisos::plazaId();
+        } elseif (!Permisos::esAdmin() && !in_array($plazaId, Permisos::misPlazas(), true)) {
+            $this->json(['success' => false, 'message' => 'Esa plaza no está entre las tuyas.'], 403);
+        }
+
+        $fechaInicio = trim((string) ($b['fecha_inicio'] ?? ''));
+        $fechaFin    = trim((string) ($b['fecha_fin'] ?? ''));
+        if ($fechaInicio !== '' && $fechaFin !== '' && $fechaFin < $fechaInicio) {
+            $this->json(['success' => false, 'message' => 'La fecha de fin no puede ser antes que la de inicio.'], 400);
+        }
+
         // La plaza queda grabada en el proyecto para que todo su equipo lo vea
         // desde el primer momento, sin esperar a que tenga movimientos.
-        $creado = (new ProyectoRentec($this->db))->crear($nombre, Permisos::idUsuario(), Permisos::plazaId());
+        $creado = (new ProyectoRentec($this->db))->crear(
+            $nombre, Permisos::idUsuario(), $plazaId,
+            $fechaInicio ?: null, $fechaFin ?: null,
+        );
         $this->json(['success' => true, 'id' => $creado['id'], 'folio' => $creado['folio']]);
     }
 

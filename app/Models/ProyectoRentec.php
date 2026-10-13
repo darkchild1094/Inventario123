@@ -44,18 +44,24 @@ class ProyectoRentec
     /**
      * Crea el folio. La plaza se graba al momento (migración 032) para que el
      * proyecto sea visible para todo su equipo desde el primer instante, sin
-     * esperar a que tenga movimientos.
+     * esperar a que tenga movimientos. fecha_inicio/fecha_fin (migración 037)
+     * las exige la UI nueva al crear, pero la columna es nullable para no
+     * reventar con los proyectos viejos que no las tienen.
      */
-    public function crear(string $nombre, int $usuarioId, int $plazaId): array
-    {
+    public function crear(
+        string $nombre, int $usuarioId, int $plazaId,
+        ?string $fechaInicio = null, ?string $fechaFin = null,
+    ): array {
         $stmt = $this->conn->prepare(
-            "INSERT INTO proyecto_rentec (nombre, usuario_id, plaza_id)
-             VALUES (:nombre, :usuario_id, :plaza_id)"
+            "INSERT INTO proyecto_rentec (nombre, usuario_id, plaza_id, fecha_inicio, fecha_fin)
+             VALUES (:nombre, :usuario_id, :plaza_id, :fecha_inicio, :fecha_fin)"
         );
         $stmt->execute([
-            ':nombre'     => $nombre,
-            ':usuario_id' => $usuarioId,
-            ':plaza_id'   => $plazaId > 0 ? $plazaId : null,
+            ':nombre'       => $nombre,
+            ':usuario_id'   => $usuarioId,
+            ':plaza_id'     => $plazaId > 0 ? $plazaId : null,
+            ':fecha_inicio' => $fechaInicio ?: null,
+            ':fecha_fin'    => $fechaFin ?: null,
         ]);
         $id = (int) $this->conn->lastInsertId();
 
@@ -75,11 +81,13 @@ class ProyectoRentec
     public function listar(?array $plazaIds, int $usuarioId): array
     {
         $sql = "SELECT pr.id, pr.folio, pr.nombre, pr.estado, pr.usuario_id, u.nombre AS usuario_nombre,
+                       pr.plaza_id, pz.nombre AS plaza_nombre, pr.fecha_inicio, pr.fecha_fin,
                        pr.creado_en, pr.cerrado_en,
                        (SELECT COUNT(*) FROM activo a WHERE a.proyecto_rentec_id = pr.id AND a.status = 'en_bodega') AS recibidos,
                        (SELECT COUNT(DISTINCT m.activo_id) FROM movimiento m WHERE m.proyecto_rentec_id = pr.id AND " . self::COND_INSTALADO . ") AS instalados
                 FROM proyecto_rentec pr
-                LEFT JOIN usuario u ON u.id = pr.usuario_id";
+                LEFT JOIN usuario u ON u.id = pr.usuario_id
+                LEFT JOIN plaza pz ON pz.id = pr.plaza_id";
 
         $params = [];
         if ($plazaIds !== null) {
@@ -117,11 +125,13 @@ class ProyectoRentec
     {
         $stmt = $this->conn->prepare(
             "SELECT pr.id, pr.folio, pr.nombre, pr.estado, pr.usuario_id, u.nombre AS usuario_nombre,
+                    pr.plaza_id, pz.nombre AS plaza_nombre, pr.fecha_inicio, pr.fecha_fin,
                     pr.creado_en, pr.cerrado_en,
                     (SELECT COUNT(*) FROM activo a WHERE a.proyecto_rentec_id = pr.id AND a.status = 'en_bodega') AS recibidos,
                     (SELECT COUNT(DISTINCT m.activo_id) FROM movimiento m WHERE m.proyecto_rentec_id = pr.id AND " . self::COND_INSTALADO . ") AS instalados
              FROM proyecto_rentec pr
              LEFT JOIN usuario u ON u.id = pr.usuario_id
+             LEFT JOIN plaza pz ON pz.id = pr.plaza_id
              WHERE pr.id = :id LIMIT 1"
         );
         $stmt->bindParam(':id', $id, PDO::PARAM_INT);
