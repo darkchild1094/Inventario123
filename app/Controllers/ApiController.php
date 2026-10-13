@@ -26,6 +26,7 @@ use App\Services\TrasladoService;
 use App\Services\EnvioService;
 use App\Helpers\ImageHelper;
 use App\Helpers\Permisos;
+use App\Helpers\FirebaseNotifier;
 
 class ApiController
 {
@@ -1311,14 +1312,28 @@ class ApiController
             $destinatarios[] = ['id' => $destUid, 'direccion' => 'a_stock'];
         }
 
+        $deNombre = (new Usuario($this->db))->obtenerPorId($yo)['nombre'] ?? '';
         foreach ($destinatarios as $d) {
-            $notifModel->crear([
+            $notifId = $notifModel->crear([
                 'usuario_destino_id' => $d['id'],
                 'de_usuario_id'      => $yo,
                 'direccion'          => $d['direccion'],
                 'lugar'              => $lugarDestino,
                 'grupo_id'           => $resultado['grupo_id'],
             ], $activos);
+
+            // Espejo a Firebase RTDB: la app que tenga esa pantalla abierta
+            // se entera al instante, sin esperar su próximo refresh normal.
+            // Si falla (sin internet el servidor, Firebase caído, etc.) no
+            // pasa nada grave: la notificación ya quedó en MySQL.
+            FirebaseNotifier::avisarNotificacion($d['id'], $notifId, [
+                'id'          => $notifId,
+                'de_nombre'   => $deNombre,
+                'direccion'   => $d['direccion'],
+                'lugar'       => $lugarDestino,
+                'n_activos'   => count($activos),
+                'creado_en'   => date('c'),
+            ]);
         }
 
         $n = count($activos);
@@ -1346,7 +1361,9 @@ class ApiController
         $this->requerirPost();
         $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $id = isset($b['id']) && $b['id'] !== '' ? (int) $b['id'] : null;
-        (new Notificacion($this->db))->marcarLeida(Permisos::idUsuario(), $id);
+        $yo = Permisos::idUsuario();
+        (new Notificacion($this->db))->marcarLeida($yo, $id);
+        FirebaseNotifier::borrarAviso($yo, $id);
         $this->json(['success' => true]);
     }
 
