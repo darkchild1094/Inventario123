@@ -261,6 +261,31 @@ class Tienda
         return $stmt->execute([':id' => $id]);
     }
 
+    /**
+     * Cuántas tiendas (del alcance) ya tienen un inventario registrado vs el
+     * total — para la tarjeta "Inventario de tiendas" del dashboard.
+     * $plazaIds null = sin acotar (admin); [] = ninguna visible.
+     */
+    public function contarConInventario(?array $plazaIds): array
+    {
+        $where = '1=1';
+        $params = [];
+        if ($plazaIds !== null) {
+            $plazaIds = array_values(array_filter(array_map('intval', $plazaIds)));
+            if (!$plazaIds) return ['con_inventario' => 0, 'total' => 0];
+            $ph = [];
+            foreach ($plazaIds as $i => $pid) { $ph[] = ":p{$i}"; $params[":p{$i}"] = $pid; }
+            $where .= ' AND plaza_id IN (' . implode(',', $ph) . ')';
+        }
+        $stmt = $this->conn->prepare(
+            "SELECT COUNT(*) AS total, SUM(ultimo_inv_fecha IS NOT NULL) AS con_inv
+             FROM {$this->table} WHERE {$where}"
+        );
+        $stmt->execute($params);
+        $r = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return ['con_inventario' => (int) ($r['con_inv'] ?? 0), 'total' => (int) ($r['total'] ?? 0)];
+    }
+
     /** Guarda el resumen del último inventario (checklist) cerrado. */
     public function guardarUltimoInventario(int $id, string $fecha, int $encontrados, int $noEncontrados): void
     {

@@ -87,6 +87,7 @@ class ApiController
 
         // Conteo por módulo visible (para las tarjetas del dashboard).
         $activoModel = new Activo($this->db);
+        $clavesModulos = array_column(Permisos::modulosApp(), 'clave');
         $porModulo = [];
         foreach (Permisos::modulosApp() as $m) {
             $clave = $m['clave'];
@@ -94,12 +95,29 @@ class ApiController
             $porModulo[$clave] = $activoModel->resumen(Permisos::filtrosModulo($clave))['total'];
         }
 
+        // Desgloses para las barras del dashboard rediseñado: "Bodega por
+        // plaza" solo tiene sentido si el rol ve Bodega (pfs no la ve); "Mi
+        // stock por tipo" es siempre lo propio, da igual el rol.
+        $bodegaPorPlaza = in_array('bodega', $clavesModulos, true)
+            ? $activoModel->resumen(Permisos::filtrosModulo('bodega'))['por_plaza']
+            : [];
+        $miStockPorTipo = $activoModel->resumen(Permisos::filtrosModulo('mi_stock'))['por_dispositivo'];
+
+        // "Inventario de tiendas": cuántas de las tiendas visibles ya tienen
+        // un checklist cerrado vs el total.
+        $misPlazasTiendas = Permisos::esAdmin() ? null : Permisos::misPlazas();
+        $tiendasInv = (new Tienda($this->db))->contarConInventario($misPlazasTiendas);
+
         $salida = [
             'total'            => $resumen['total'],
             'por_status'       => $resumen['por_status'],
             'por_dispositivo'  => $resumen['por_dispositivo'],
             'por_plaza'        => $resumen['por_plaza'],
             'por_modulo'       => $porModulo,
+            'bodega_por_plaza' => $bodegaPorPlaza,
+            'mi_stock_por_tipo' => $miStockPorTipo,
+            'tiendas_con_inventario' => $tiendasInv['con_inventario'],
+            'tiendas_total'    => $tiendasInv['total'],
             'notificaciones_no_leidas' => $noLeidas,
             'movimientos'      => array_map(fn($m) => [
                 'evento'      => $m['evento'],
