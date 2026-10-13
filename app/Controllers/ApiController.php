@@ -17,6 +17,7 @@ use App\Models\Stock;
 use App\Models\Movimiento;
 use App\Models\SolicitudTraslado;
 use App\Models\InventarioBodega;
+use App\Models\InventarioTienda;
 use App\Models\ProyectoRentec;
 use App\Models\Notificacion;
 use App\Services\ActivoGuardado;
@@ -2030,6 +2031,151 @@ class ApiController
         if (!empty($inv['bodega_id'])) return $this->puedeOperarBodega((int) $inv['bodega_id']);
         if (!empty($inv['stock_usuario_id'])) return $this->puedeOperarStockUsuario((int) $inv['stock_usuario_id']);
         return false;
+    }
+
+    // ── Inventario (checklist) de tienda — ver migración 036 / InventarioTienda.php.
+    // NO es el mismo mecanismo que inventarioBodega*/inventarioStock* de arriba
+    // (aquellos son auditoría mensual de bodega/stock personal; esto es por
+    // visita, de los activos instalados en una tienda).
+
+    private function puedeOperarTienda(int $tiendaId): bool
+    {
+        if (Permisos::esAdmin()) return true;
+        $t = (new Tienda($this->db))->obtenerPorId($tiendaId);
+        return $t && in_array((int) $t['plaza_id'], Permisos::misPlazas(), true);
+    }
+
+    // GET ?action=inventarioTiendaAbierto&tienda_id=
+    public function inventarioTiendaAbierto(): void
+    {
+        $tiendaId = (int) ($_GET['tienda_id'] ?? 0);
+        if (!$this->puedeOperarTienda($tiendaId)) {
+            $this->json(['success' => false, 'message' => 'Sin acceso a esta tienda.'], 403);
+        }
+        $abierto = (new InventarioTienda($this->db))->obtenerAbierto($tiendaId);
+        $this->json(['abierto' => $abierto ?: null]);
+    }
+
+    // POST ?action=inventarioTiendaIniciar  tienda_id=
+    public function inventarioTiendaIniciar(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $tiendaId = (int) ($b['tienda_id'] ?? 0);
+        if (!$this->puedeOperarTienda($tiendaId)) {
+            $this->json(['success' => false, 'message' => 'Sin acceso a esta tienda.'], 403);
+        }
+        $model = new InventarioTienda($this->db);
+        $abierto = $model->obtenerAbierto($tiendaId);
+        if ($abierto) {
+            $this->json(['success' => true, 'inventario' => $model->obtenerDetalle((int) $abierto['id'])]);
+        }
+        $id = $model->crear($tiendaId, Permisos::idUsuario());
+        $this->json(['success' => true, 'inventario' => $model->obtenerDetalle($id)]);
+    }
+
+    // GET ?action=inventarioTiendaDetalle&id=
+    public function inventarioTiendaDetalle(): void
+    {
+        $id = (int) ($_GET['id'] ?? 0);
+        $model = new InventarioTienda($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        $this->json($model->obtenerDetalle($id));
+    }
+
+    // POST ?action=inventarioTiendaEscanear  id= (del inventario), codigo=
+    public function inventarioTiendaEscanear(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $invId  = (int) ($b['id'] ?? 0);
+        $codigo = trim($b['codigo'] ?? '');
+        $model  = new InventarioTienda($this->db);
+        $cab    = $model->obtenerCabecera($invId);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        if ($codigo === '') $this->json(['success' => false, 'message' => 'Falta el código.'], 400);
+
+        $activoId = $model->marcarEscaneado($invId, $codigo, Permisos::idUsuario());
+        if ($activoId === null) {
+            $this->json(['success' => false, 'message' => 'Ese código no pertenece a esta tienda.'], 404);
+        }
+        $this->json(['success' => true, 'activo_id' => $activoId]);
+    }
+
+    // POST ?action=inventarioTiendaMarcar  detalle_id=, encontrado=1|0
+    // Toque manual ✓/✗ en pantalla (el nuevo diseño lo permite sin escanear).
+    public function inventarioTiendaMarcar(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $detalleId  = (int) ($b['detalle_id'] ?? 0);
+        $encontrado = !empty($b['encontrado']);
+
+        $model = new InventarioTienda($this->db);
+        $fila  = $model->obtenerDetalleRow($detalleId);
+        if (!$fila) $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        $cab = $model->obtenerCabecera((int) $fila['inventario_id']);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $model->marcar($detalleId, $encontrado, Permisos::idUsuario());
+        $this->json(['success' => true]);
+    }
+
+    // POST ?action=inventarioTiendaNota  detalle_id=, nota=
+    public function inventarioTiendaNota(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $detalleId = (int) ($b['detalle_id'] ?? 0);
+        $nota      = trim($b['nota'] ?? '');
+
+        $model = new InventarioTienda($this->db);
+        $fila  = $model->obtenerDetalleRow($detalleId);
+        if (!$fila) $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        $cab = $model->obtenerCabecera((int) $fila['inventario_id']);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $model->guardarNota($detalleId, $nota);
+        $this->json(['success' => true]);
+    }
+
+    // POST ?action=inventarioTiendaCerrar  id=
+    public function inventarioTiendaCerrar(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+
+        $model = new InventarioTienda($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        $resumen = $model->cerrar($id);
+        $this->json(['success' => true, 'resumen' => $resumen]);
+    }
+
+    // POST ?action=inventarioTiendaCancelar  id=
+    public function inventarioTiendaCancelar(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+
+        $model = new InventarioTienda($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab || !$this->puedeOperarTienda((int) $cab['tienda_id'])) {
+            $this->json(['success' => false, 'message' => 'No encontrado.'], 404);
+        }
+        $model->cancelar($id);
+        $this->json(['success' => true]);
     }
 
     // ── RENTEC: proyectos de Renovación Tecnológica ─────────────────────────
