@@ -1879,6 +1879,15 @@ class ApiController
         return [$cr, $nombre, $plazaId, $atiId, null];
     }
 
+    // GET ?action=obtenerTienda&id=X — para precargar el formulario de editar.
+    public function obtenerTienda(): void
+    {
+        $id = (int) ($_GET['id'] ?? 0);
+        $t  = $id > 0 ? (new Tienda($this->db))->obtenerPorId($id) : false;
+        if (!$t) { $this->json(['success' => false, 'message' => 'Tienda no encontrada.'], 404); }
+        $this->json($t);
+    }
+
     // POST ?action=tiendaCrear  cr_tienda, nombre, plaza_id, ati_usuario_id?
     public function tiendaCrear(): void
     {
