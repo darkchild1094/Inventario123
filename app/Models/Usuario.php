@@ -107,6 +107,26 @@ class Usuario
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Coordinadores + admins de una plaza — a quién avisar cuando alguien
+     * "Envía" activos a la bodega de esa plaza (una bodega no es una
+     * persona; se notifica a quien la gestiona). Los admins van siempre
+     * (ven todas las plazas), los coordinadores solo si la plaza es suya.
+     */
+    public function coordinadoresYAdminsDePlaza(int $plazaId): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT DISTINCT u.id, u.nombre
+             FROM {$this->tabla} u
+             LEFT JOIN usuario_plaza up ON up.usuario_id = u.id
+             WHERE u.tipo = 'admin'
+                OR (u.tipo = 'coordinador' AND (u.plaza_id = :p1 OR up.plaza_id = :p2))
+             ORDER BY u.nombre"
+        );
+        $stmt->execute([':p1' => $plazaId, ':p2' => $plazaId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function obtenerPorPlaza(int $plazaId): array
     {
         $stmt = $this->conn->prepare(

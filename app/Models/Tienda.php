@@ -181,4 +181,93 @@ class Tienda
         $stmt->execute([':p1' => $plazaId, ':p2' => $plazaId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    // ── CRUD (nuevo diseño: antes solo había lectura + asignar ATI) ───────
+
+    /** ¿Ya existe otra tienda con ese CR? $exceptoId para validar en edición. */
+    public function existeCr(string $cr, ?int $exceptoId = null): bool
+    {
+        $sql = "SELECT 1 FROM {$this->table} WHERE cr_tienda = :cr";
+        $params = [':cr' => $cr];
+        if ($exceptoId !== null) {
+            $sql .= ' AND id != :id';
+            $params[':id'] = $exceptoId;
+        }
+        $stmt = $this->conn->prepare($sql . ' LIMIT 1');
+        $stmt->execute($params);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    public function crear(array $d): int
+    {
+        $stmt = $this->conn->prepare(
+            "INSERT INTO {$this->table} (cr_tienda, nombre, plaza_id, ati_usuario_id, coordenadas)
+             VALUES (:cr, :nombre, :plaza_id, :ati, :coords)"
+        );
+        $stmt->execute([
+            ':cr'     => $d['cr_tienda'],
+            ':nombre' => $d['nombre'],
+            ':plaza_id' => $d['plaza_id'],
+            ':ati'    => $d['ati_usuario_id'] ?: null,
+            ':coords' => $d['coordenadas'] ?? null,
+        ]);
+        $id = (int) $this->conn->lastInsertId();
+        // El trigger de la migración 001 crea el stock de la tienda al
+        // insertar en `tienda`; nada más que hacer aquí.
+        return $id;
+    }
+
+    public function actualizar(int $id, array $d): bool
+    {
+        $stmt = $this->conn->prepare(
+            "UPDATE {$this->table}
+                SET cr_tienda = :cr, nombre = :nombre, plaza_id = :plaza_id,
+                    ati_usuario_id = :ati, coordenadas = :coords
+              WHERE id = :id"
+        );
+        return $stmt->execute([
+            ':cr'     => $d['cr_tienda'],
+            ':nombre' => $d['nombre'],
+            ':plaza_id' => $d['plaza_id'],
+            ':ati'    => $d['ati_usuario_id'] ?: null,
+            ':coords' => $d['coordenadas'] ?? null,
+            ':id'     => $id,
+        ]);
+    }
+
+    /** Activos hoy instalados en la tienda (stock_tipo='tienda'). */
+    public function contarActivosInstalados(int $id): int
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT COUNT(*) FROM activo a
+             JOIN stock s ON s.id = a.stock_id
+             WHERE s.tipo = 'tienda' AND s.tienda_id = :id"
+        );
+        $stmt->execute([':id' => $id]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Borra la tienda. El llamador debe haber verificado ya
+     * contarActivosInstalados()==0 — aquí solo se ejecuta el DELETE
+     * (las FKs de `stock`/`inventario_tienda` referencian esta tienda,
+     * así que si quedara algo colgado la base lo rechazaría igual).
+     */
+    public function eliminar(int $id): bool
+    {
+        $stmt = $this->conn->prepare("DELETE FROM {$this->table} WHERE id = :id");
+        return $stmt->execute([':id' => $id]);
+    }
+
+    /** Guarda el resumen del último inventario (checklist) cerrado. */
+    public function guardarUltimoInventario(int $id, string $fecha, int $encontrados, int $noEncontrados): void
+    {
+        $stmt = $this->conn->prepare(
+            "UPDATE {$this->table}
+                SET ultimo_inv_fecha = :fecha, ultimo_inv_encontrados = :ok,
+                    ultimo_inv_no_encontrados = :falta
+              WHERE id = :id"
+        );
+        $stmt->execute([':fecha' => $fecha, ':ok' => $encontrados, ':falta' => $noEncontrados, ':id' => $id]);
+    }
 }

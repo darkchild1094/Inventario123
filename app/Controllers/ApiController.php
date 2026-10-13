@@ -18,9 +18,11 @@ use App\Models\Movimiento;
 use App\Models\SolicitudTraslado;
 use App\Models\InventarioBodega;
 use App\Models\ProyectoRentec;
+use App\Models\Notificacion;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
 use App\Services\TrasladoService;
+use App\Services\EnvioService;
 use App\Helpers\ImageHelper;
 use App\Helpers\Permisos;
 
@@ -1252,6 +1254,101 @@ class ApiController
     // tiene las columnas exactas: origen, destino, estado, los activos y la
     // fecha de resolución. Las columnas de firma quedan sin usar.
 
+    // POST ?action=enviarActivos
+    //   activos[]=, tipo=bodega|usuario, plaza_id= (si tipo=bodega), usuario_id= (si tipo=usuario)
+    //
+    // Reemplaza transferirActivo/SolicitudTraslado para el nuevo diseño: el
+    // envío es INMEDIATO, sin aceptación del receptor (nada queda "pendiente").
+    // Crea una notificación de aviso para quien corresponda.
+    public function enviarActivos(): void
+    {
+        $this->requerirPost();
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+
+        $yo      = Permisos::idUsuario();
+        $activos = array_values(array_unique(array_map('intval', (array) ($b['activos'] ?? []))));
+        $tipo    = $b['tipo'] ?? '';
+
+        if (!$activos) {
+            $this->json(['success' => false, 'message' => 'No se seleccionó ningún activo.'], 400);
+        }
+        if (!in_array($tipo, ['bodega', 'usuario'], true)) {
+            $this->json(['success' => false, 'message' => 'Elige el destino.'], 400);
+        }
+
+        $servicio = new EnvioService($this->db);
+        $notifModel = new Notificacion($this->db);
+        $destinatarios = []; // [usuario_id, lugar, direccion]
+        $lugarDestino  = '';
+
+        if ($tipo === 'bodega') {
+            $plazaId = (int) ($b['plaza_id'] ?? 0);
+            if ($plazaId <= 0) $this->json(['success' => false, 'message' => 'Elige la bodega.'], 400);
+
+            $resultado = $servicio->enviar($activos, 'bodega', ['plaza_id' => $plazaId], $yo);
+            if (!$resultado['ok']) $this->json(['success' => false, 'message' => $resultado['error']], 500);
+
+            $plaza = (new Plaza($this->db))->obtenerPorId($plazaId);
+            $lugarDestino = 'Bodega ' . ($plaza['nombre'] ?? '');
+            foreach ((new Usuario($this->db))->coordinadoresYAdminsDePlaza($plazaId) as $u) {
+                if ((int) $u['id'] === $yo) continue; // no te notificas a ti mismo
+                $destinatarios[] = ['id' => (int) $u['id'], 'direccion' => 'a_bodega'];
+            }
+        } else {
+            $destUid = (int) ($b['usuario_id'] ?? 0);
+            if ($destUid <= 0) $this->json(['success' => false, 'message' => 'Elige el usuario.'], 400);
+            $destino = (new Usuario($this->db))->obtenerPorId($destUid);
+            if (!$destino) $this->json(['success' => false, 'message' => 'Usuario destino no encontrado.'], 404);
+
+            $resultado = $servicio->enviar($activos, 'usuario', [
+                'asignado_usuario_id' => $destUid,
+                'plaza_id'            => (int) $destino['plaza_id'],
+            ], $yo);
+            if (!$resultado['ok']) $this->json(['success' => false, 'message' => $resultado['error']], 500);
+
+            $lugarDestino = $destino['nombre'];
+            $destinatarios[] = ['id' => $destUid, 'direccion' => 'a_stock'];
+        }
+
+        foreach ($destinatarios as $d) {
+            $notifModel->crear([
+                'usuario_destino_id' => $d['id'],
+                'de_usuario_id'      => $yo,
+                'direccion'          => $d['direccion'],
+                'lugar'              => $lugarDestino,
+                'grupo_id'           => $resultado['grupo_id'],
+            ], $activos);
+        }
+
+        $n = count($activos);
+        $this->json([
+            'success' => true,
+            'message' => "{$n} activo(s) enviado(s) a {$lugarDestino}.",
+        ]);
+    }
+
+    // GET ?action=listarNotificaciones
+    public function listarNotificaciones(): void
+    {
+        $this->json((new Notificacion($this->db))->listarDeUsuario(Permisos::idUsuario()));
+    }
+
+    // GET ?action=contarNotificacionesNoLeidas
+    public function contarNotificacionesNoLeidas(): void
+    {
+        $this->json(['n' => (new Notificacion($this->db))->contarNoLeidas(Permisos::idUsuario())]);
+    }
+
+    // POST ?action=marcarNotificacionLeida  id= (opcional; sin id = todas)
+    public function marcarNotificacionLeida(): void
+    {
+        $this->requerirPost();
+        $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = isset($b['id']) && $b['id'] !== '' ? (int) $b['id'] : null;
+        (new Notificacion($this->db))->marcarLeida(Permisos::idUsuario(), $id);
+        $this->json(['success' => true]);
+    }
+
     // POST ?action=transferirActivo
     //   activos[]=, destino_usuario_id=, nota=, origen=mi_stock|bodega, bodega_id=
     //
@@ -2102,6 +2199,85 @@ class ApiController
         } else {
             $this->json(['success' => false, 'message' => 'No se pudo actualizar.'], 500);
         }
+    }
+
+    /** @return array{0:string,1:int,2:?int,3:?string,4:?string} cr,nombre,plaza_id,ati_usuario_id,error */
+    private function datosTiendaPost(): array
+    {
+        $cr     = trim($_POST['cr_tienda'] ?? '');
+        $nombre = trim($_POST['nombre'] ?? '');
+        $plazaId = (int) ($_POST['plaza_id'] ?? 0);
+        $atiId   = (int) ($_POST['ati_usuario_id'] ?? 0) ?: null;
+
+        if ($cr === '')     return ['', '', 0, null, 'Falta el CR.'];
+        if ($nombre === '') return ['', '', 0, null, 'Falta el nombre.'];
+        if ($plazaId <= 0)  return ['', '', 0, null, 'Elige una plaza.'];
+        return [$cr, $nombre, $plazaId, $atiId, null];
+    }
+
+    // POST ?action=tiendaCrear  cr_tienda, nombre, plaza_id, ati_usuario_id?
+    public function tiendaCrear(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeGestionarTiendas()) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        [$cr, $nombre, $plazaId, $atiId, $error] = $this->datosTiendaPost();
+        if ($error) $this->json(['success' => false, 'message' => $error], 400);
+
+        $model = new Tienda($this->db);
+        if ($model->existeCr($cr)) {
+            $this->json(['success' => false, 'message' => 'Ese CR ya existe.'], 409);
+        }
+        $id = $model->crear(['cr_tienda' => $cr, 'nombre' => $nombre, 'plaza_id' => $plazaId, 'ati_usuario_id' => $atiId]);
+        $this->json(['success' => true, 'message' => 'Tienda creada.', 'id' => $id]);
+    }
+
+    // POST ?action=tiendaActualizar  id, cr_tienda, nombre, plaza_id, ati_usuario_id?
+    public function tiendaActualizar(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeGestionarTiendas()) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) $this->json(['success' => false, 'message' => 'Tienda inválida.'], 400);
+
+        [$cr, $nombre, $plazaId, $atiId, $error] = $this->datosTiendaPost();
+        if ($error) $this->json(['success' => false, 'message' => $error], 400);
+
+        $model = new Tienda($this->db);
+        if (!$model->obtenerPorId($id)) {
+            $this->json(['success' => false, 'message' => 'Tienda no encontrada.'], 404);
+        }
+        if ($model->existeCr($cr, $id)) {
+            $this->json(['success' => false, 'message' => 'Ese CR ya existe.'], 409);
+        }
+        $model->actualizar($id, ['cr_tienda' => $cr, 'nombre' => $nombre, 'plaza_id' => $plazaId, 'ati_usuario_id' => $atiId]);
+        $this->json(['success' => true, 'message' => 'Tienda actualizada.']);
+    }
+
+    // POST ?action=tiendaEliminar  id
+    public function tiendaEliminar(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::puedeGestionarTiendas()) {
+            $this->json(['success' => false, 'message' => 'Acceso restringido.'], 403);
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $model = new Tienda($this->db);
+        if (!$model->obtenerPorId($id)) {
+            $this->json(['success' => false, 'message' => 'Tienda no encontrada.'], 404);
+        }
+        $n = $model->contarActivosInstalados($id);
+        if ($n > 0) {
+            $this->json([
+                'success' => false,
+                'message' => "Tiene {$n} activo(s) instalado(s); retíralos o muévelos antes de borrar la tienda.",
+            ], 409);
+        }
+        $model->eliminar($id);
+        $this->json(['success' => true, 'message' => 'Tienda eliminada.']);
     }
 
     // ── Auth ──────────────────────────────────────────────────────────────────
