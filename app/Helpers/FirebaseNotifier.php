@@ -15,6 +15,16 @@ namespace App\Helpers;
  * (MySQL ya tiene la notificación guardada, la app la ve en su próximo
  * refresh normal aunque no haya llegado "al instante") — por eso todo va
  * en un try/catch silencioso que a lo más deja un log.
+ *
+ * El hosting compartido (alwaysdata) falla el handshake TLS hacia Google con
+ * una tasa alta (gnutls_handshake(): "non-properly terminated", curl errno
+ * 35 — confirmado probando en vivo: ronda el 70-80% de las peticiones,
+ * sin relación con HTTP/1.1 vs HTTP/2 ni con forzar TLS 1.2, así que es la
+ * compilación de cURL/GnuTLS del hosting, no algo corregible desde PHP). Con
+ * una tasa de fallo así, un solo reintento no basta: curlConReintento()
+ * insiste varias veces antes de darse por vencido — cada intento es barato
+ * (falla rápido, sin esperar el timeout completo) y el costo de insistir de
+ * más es mucho menor que el de un aviso "inmediato" que nunca llega.
  */
 class FirebaseNotifier
 {
@@ -30,22 +40,45 @@ class FirebaseNotifier
             if (!$idToken) return false;
 
             $url = self::DATABASE_URL . '/' . ltrim($ruta, '/') . '.json?auth=' . urlencode($idToken);
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST  => 'PUT',
-                CURLOPT_POSTFIELDS     => json_encode($datos, JSON_UNESCAPED_UNICODE),
-                CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT        => 5,
-            ]);
-            $resp = curl_exec($ch);
-            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
+            [$code, ] = self::curlConReintento($url, 'PUT', json_encode($datos, JSON_UNESCAPED_UNICODE));
             return $code >= 200 && $code < 300;
         } catch (\Throwable $e) {
             error_log('FirebaseNotifier: ' . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Un curl_exec con varios reintentos inmediatos si la conexión falla a
+     * nivel de transporte (errno != 0 → nunca llegó a haber respuesta HTTP,
+     * así que no hay ambigüedad de reintentar una escritura a medias: nada
+     * se aplicó a medias en Firebase si no hubo respuesta). Con ~75% de
+     * fallo por intento, 5 intentos dejan la probabilidad de fallo total
+     * en ~0.75⁵ ≈ 24%; cada intento falla en milisegundos (no espera el
+     * timeout completo), así que el costo de insistir es bajo.
+     */
+    private static function curlConReintento(string $url, string $metodo, ?string $body): array
+    {
+        for ($intento = 1; $intento <= 5; $intento++) {
+            $ch = curl_init($url);
+            $opts = [
+                CURLOPT_CUSTOMREQUEST  => $metodo,
+                CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 5,
+            ];
+            if ($body !== null) $opts[CURLOPT_POSTFIELDS] = $body;
+            curl_setopt_array($ch, $opts);
+            $resp  = curl_exec($ch);
+            $errno = curl_errno($ch);
+            $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($errno === 0) return [$code, $resp];
+            // Fallo de transporte (TLS, DNS, timeout...): nunca hubo
+            // respuesta del servidor, un segundo intento es seguro.
+        }
+        return [0, null];
     }
 
     /** Aviso de notificación nueva, bajo notificaciones/<usuario_destino_id>/<id>. */
@@ -69,14 +102,7 @@ class FirebaseNotifier
             $idToken = self::obtenerIdToken();
             if (!$idToken) return;
             $url = self::DATABASE_URL . '/' . $ruta . '.json?auth=' . urlencode($idToken);
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST  => 'DELETE',
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT        => 5,
-            ]);
-            curl_exec($ch);
-            curl_close($ch);
+            self::curlConReintento($url, 'DELETE', null);
         } catch (\Throwable $e) {
             error_log('FirebaseNotifier::borrarAviso: ' . $e->getMessage());
         }
@@ -137,17 +163,7 @@ class FirebaseNotifier
 
     private static function post(string $url, array $body): ?array
     {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => json_encode($body),
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 5,
-        ]);
-        $resp = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        [$code, $resp] = self::curlConReintento($url, 'POST', json_encode($body));
         if ($code < 200 || $code >= 300 || !$resp) return null;
         $json = json_decode($resp, true);
         return is_array($json) ? $json : null;

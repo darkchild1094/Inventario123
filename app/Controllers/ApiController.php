@@ -1313,6 +1313,7 @@ class ApiController
         }
 
         $deNombre = (new Usuario($this->db))->obtenerPorId($yo)['nombre'] ?? '';
+        $avisos = []; // para que la app también escriba su propio espejo (ver abajo)
         foreach ($destinatarios as $d) {
             $notifId = $notifModel->crear([
                 'usuario_destino_id' => $d['id'],
@@ -1322,24 +1323,32 @@ class ApiController
                 'grupo_id'           => $resultado['grupo_id'],
             ], $activos);
 
-            // Espejo a Firebase RTDB: la app que tenga esa pantalla abierta
-            // se entera al instante, sin esperar su próximo refresh normal.
-            // Si falla (sin internet el servidor, Firebase caído, etc.) no
-            // pasa nada grave: la notificación ya quedó en MySQL.
-            FirebaseNotifier::avisarNotificacion($d['id'], $notifId, [
-                'id'          => $notifId,
-                'de_nombre'   => $deNombre,
-                'direccion'   => $d['direccion'],
-                'lugar'       => $lugarDestino,
-                'n_activos'   => count($activos),
-                'creado_en'   => date('c'),
-            ]);
+            $datosAviso = [
+                'id'        => $notifId,
+                'de_nombre' => $deNombre,
+                'direccion' => $d['direccion'],
+                'lugar'     => $lugarDestino,
+                'n_activos' => count($activos),
+                'creado_en' => date('c'),
+            ];
+            $avisos[] = ['usuario_destino_id' => $d['id'], 'notificacion_id' => $notifId, 'datos' => $datosAviso];
+
+            // Espejo a Firebase RTDB vía el backend: mejor esfuerzo, NO
+            // garantizado. El hosting compartido falla el handshake TLS
+            // hacia Google con una tasa alta (ver docblock de
+            // FirebaseNotifier) — por eso el canal confiable es que la
+            // propia app también escriba este mismo nodo tras recibir la
+            // respuesta de este endpoint (usa el SDK de Firebase, no cURL
+            // crudo, y no sufre ese problema). Si de casualidad el backend
+            // sí lo logra, no hace daño — es la misma escritura idéntica.
+            FirebaseNotifier::avisarNotificacion($d['id'], $notifId, $datosAviso);
         }
 
         $n = count($activos);
         $this->json([
             'success' => true,
             'message' => "{$n} activo(s) enviado(s) a {$lugarDestino}.",
+            'avisos'  => $avisos,
         ]);
     }
 
