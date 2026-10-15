@@ -199,7 +199,7 @@ class ApiController
         $filtros = array_merge(Permisos::filtrosModulo($modulo), $comun);
         $filtros = $this->aplicarAcotadores($filtros, $modulo);
 
-        $ordenCampoValido = ['ingreso', 'tipo', 'codigo_barras', 'serie'];
+        $ordenCampoValido = ['ingreso', 'tipo', 'codigo_barras', 'serie', 'procedencia'];
         $ordenCampo = $_GET['orden_campo'] ?? 'ingreso';
         if (!in_array($ordenCampo, $ordenCampoValido, true)) $ordenCampo = 'ingreso';
         $filtros['orden_campo'] = $ordenCampo;

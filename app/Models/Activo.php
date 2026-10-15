@@ -284,6 +284,7 @@ class Activo
             'tipo'          => 'd.nombre',
             'codigo_barras' => 'a.codigo_barras',
             'serie'         => 'a.serie',
+            'procedencia'   => 'tp.nombre',
             default         => 'a.fecha_alta', // 'ingreso'
         };
     }
