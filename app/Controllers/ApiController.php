@@ -1910,8 +1910,10 @@ class ApiController
         if (!$model->obtenerCabecera($id)) {
             $this->json(['success' => false, 'message' => 'Proyecto no encontrado.'], 404);
         }
+        $movimientos = array_map('intval', (array) ($b['movimientos'] ?? []));
         $afectados = $model->vincularActivos($id, $activos);
-        $this->json(['success' => true, 'afectados' => $afectados]);
+        $afectadosMov = $movimientos ? $model->vincularMovimientos($id, $movimientos) : 0;
+        $this->json(['success' => true, 'afectados' => $afectados, 'afectados_movimientos' => $afectadosMov]);
     }
 
     private function puedeVerRentec(array $cabecera, ProyectoRentec $model): bool

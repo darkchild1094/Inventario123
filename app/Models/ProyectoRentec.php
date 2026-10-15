@@ -168,7 +168,8 @@ class ProyectoRentec
                     a.serie AS serie_entra, a.codigo_barras AS codigo_entra,
                     mo.nombre AS modelo_nombre, mar.nombre AS marca_nombre, di.nombre AS dispositivo_nombre,
                     sale.serie AS serie_sale, sale.codigo_barras AS codigo_sale, sale.num_activo AS num_activo_sale,
-                    dsale.nombre AS dispositivo_sale_nombre
+                    dsale.nombre AS dispositivo_sale_nombre,
+                    mosale.nombre AS modelo_sale_nombre, marsale.nombre AS marca_sale_nombre
              FROM movimiento m
              JOIN activo a ON a.id = m.activo_id
              LEFT JOIN modelo mo ON mo.id = a.modelo_id
@@ -178,6 +179,7 @@ class ProyectoRentec
              LEFT JOIN usuario u ON u.id = m.usuario_id
              LEFT JOIN activo sale ON sale.id = m.activo_relacionado_id
              LEFT JOIN modelo mosale ON mosale.id = sale.modelo_id
+             LEFT JOIN marca marsale ON marsale.id = mosale.marca_id
              LEFT JOIN dispositivo dsale ON dsale.id = mosale.dispositivo_id
              WHERE m.proyecto_rentec_id = :id AND " . self::COND_INSTALADO . "
              ORDER BY m.creado_en DESC"
@@ -185,6 +187,31 @@ class ProyectoRentec
         $instalados->bindParam(':id', $id, PDO::PARAM_INT);
         $instalados->execute();
         $cab['detalle_instalados'] = $instalados->fetchAll(PDO::FETCH_ASSOC);
+
+        // Equipo que salió del proyecto SIN que entrara nada en su lugar (p.
+        // ej. un micrófono o grabador que simplemente se retira). No tiene
+        // activo_relacionado_id porque no es un reemplazo: es el propio activo
+        // el que se movió a 'asignado'/'en_bodega'/etc.
+        $retirados = $this->conn->prepare(
+            "SELECT m.id AS movimiento_id, m.evento, m.creado_en, m.tienda_id, t.nombre AS tienda_nombre, t.cr_tienda AS cr_tienda,
+                    m.activo_id, m.usuario_id, u.nombre AS usuario_nombre,
+                    a.serie, a.codigo_barras, a.num_activo,
+                    mo.nombre AS modelo_nombre, mar.nombre AS marca_nombre, di.nombre AS dispositivo_nombre
+             FROM movimiento m
+             JOIN activo a ON a.id = m.activo_id
+             LEFT JOIN modelo mo ON mo.id = a.modelo_id
+             LEFT JOIN marca mar ON mar.id = mo.marca_id
+             LEFT JOIN dispositivo di ON di.id = mo.dispositivo_id
+             LEFT JOIN tienda t ON t.id = m.tienda_id
+             LEFT JOIN usuario u ON u.id = m.usuario_id
+             WHERE m.proyecto_rentec_id = :id
+               AND m.evento NOT IN ('alta', 'reemplazo_entra')
+               AND m.activo_relacionado_id IS NULL
+             ORDER BY m.creado_en DESC"
+        );
+        $retirados->bindParam(':id', $id, PDO::PARAM_INT);
+        $retirados->execute();
+        $cab['detalle_retirados_sin_reemplazo'] = $retirados->fetchAll(PDO::FETCH_ASSOC);
 
         return $cab;
     }
@@ -242,6 +269,25 @@ class ProyectoRentec
         $stmtM->execute(array_merge([$proyectoId], $activoIds));
 
         return $afectados;
+    }
+
+    /**
+     * Enlaza al proyecto movimientos puntuales por su id (p. ej. un retiro
+     * SIN reemplazo —evento 'cambio_status'— que nunca llevó proyecto_rentec_id
+     * porque el alta/reemplazo del equipo que entraba era aparte). A diferencia
+     * de vincularActivos, aquí se apunta al movimiento exacto, sin importar su
+     * evento; sigue sin pisar uno que ya tenga proyecto asignado.
+     */
+    public function vincularMovimientos(int $proyectoId, array $movimientoIds): int
+    {
+        $movimientoIds = array_values(array_unique(array_map('intval', $movimientoIds)));
+        if (!$movimientoIds) return 0;
+        $ph = implode(',', array_fill(0, count($movimientoIds), '?'));
+        $stmt = $this->conn->prepare(
+            "UPDATE movimiento SET proyecto_rentec_id = ? WHERE id IN ({$ph}) AND proyecto_rentec_id IS NULL"
+        );
+        $stmt->execute(array_merge([$proyectoId], $movimientoIds));
+        return $stmt->rowCount();
     }
 
     /**

@@ -224,36 +224,63 @@ class ExportController
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('TODO');
 
-        $headers = ['CR', 'TIENDA', 'Descripción', 'Cantidad', 'PFS', '', 'PLACA', 'SERIE', 'N° Activo Retirado'];
+        $headers = [
+            'CR', 'TIENDA', 'PFS',
+            'INSTALADO', 'Modelo instalado', 'Placa instalada', 'Serie instalada',
+            'RETIRADO', 'Modelo retirado', 'Placa retirada', 'Serie retirada',
+        ];
         foreach ($headers as $i => $h) {
             $sheet->setCellValue([$i + 1, 1], $h);
         }
-        $sheet->getStyle('A1:H1')->getFont()->setBold(true);
-        $anchos = ['A' => 10, 'B' => 28, 'C' => 32, 'D' => 10, 'E' => 14, 'F' => 4, 'G' => 12, 'H' => 16, 'I' => 18];
+        $sheet->getStyle('A1:K1')->getFont()->setBold(true);
+        $anchos = [
+            'A' => 10, 'B' => 28, 'C' => 14,
+            'D' => 20, 'E' => 18, 'F' => 14, 'G' => 18,
+            'H' => 20, 'I' => 18, 'J' => 14, 'K' => 18,
+        ];
         foreach ($anchos as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
-        // Columna I: N° de activo del equipo retirado. No se muestra en la
-        // app (solo sirve para conciliar el registro de Activo Fijo) -- se
-        // deja en la hoja pero oculta por default.
-        $sheet->getColumnDimension('I')->setVisible(false);
 
         $fila = 2;
         foreach ($detalle['detalle_instalados'] ?? [] as $row) {
+            $hayRetirado = !empty($row['activo_relacionado_id']);
             $sheet->setCellValue("A{$fila}", $row['cr_tienda'] ?? '');
             $sheet->setCellValue("B{$fila}", $row['tienda_nombre'] ?? '');
-            $sheet->setCellValue("C{$fila}", trim(($row['dispositivo_nombre'] ?? '') . ' ' . ($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
-            $sheet->setCellValue("D{$fila}", 1);
-            $sheet->setCellValue("E{$fila}", $this->claveUsuario($row));
-            $sheet->setCellValue("G{$fila}", $row['codigo_entra'] ?? '');
-            $sheet->setCellValue("H{$fila}", $row['serie_entra'] ?? '');
-            $sheet->setCellValue("I{$fila}", $row['num_activo_sale'] ?? '');
+            $sheet->setCellValue("C{$fila}", $this->claveUsuario($row));
+            $sheet->setCellValue("D{$fila}", $row['dispositivo_nombre'] ?? '');
+            $sheet->setCellValue("E{$fila}", trim(($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
+            $sheet->setCellValue("F{$fila}", $row['codigo_entra'] ?? '');
+            $sheet->setCellValue("G{$fila}", $row['serie_entra'] ?? '');
+            if ($hayRetirado) {
+                $sheet->setCellValue("H{$fila}", $row['dispositivo_sale_nombre'] ?? '');
+                $sheet->setCellValue("I{$fila}", trim(($row['marca_sale_nombre'] ?? '') . ' ' . ($row['modelo_sale_nombre'] ?? '')));
+                $sheet->setCellValue("J{$fila}", $row['codigo_sale'] ?? '');
+                $sheet->setCellValue("K{$fila}", $row['serie_sale'] ?? '');
+            } else {
+                $sheet->setCellValue("H{$fila}", '(equipo adicional, sin retiro)');
+            }
             $fila++;
         }
+
+        // Equipo retirado SIN que entrara nada en su lugar (micrófonos,
+        // grabadores que simplemente se quitan): mismas columnas de retiro,
+        // las de instalado quedan vacías.
+        foreach ($detalle['detalle_retirados_sin_reemplazo'] ?? [] as $row) {
+            $sheet->setCellValue("A{$fila}", $row['cr_tienda'] ?? '');
+            $sheet->setCellValue("B{$fila}", $row['tienda_nombre'] ?? '');
+            $sheet->setCellValue("C{$fila}", $this->claveUsuario($row));
+            $sheet->setCellValue("D{$fila}", '(sin instalación — solo retiro)');
+            $sheet->setCellValue("H{$fila}", $row['dispositivo_nombre'] ?? '');
+            $sheet->setCellValue("I{$fila}", trim(($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
+            $sheet->setCellValue("J{$fila}", $row['codigo_barras'] ?? '');
+            $sheet->setCellValue("K{$fila}", $row['serie'] ?? '');
+            $fila++;
+        }
+
         $ultima = $fila - 1;
         if ($ultima >= 2) {
-            $sheet->getStyle("A2:I{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-            $sheet->getStyle("D2:D{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("A2:K{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
         }
 
         $folio = preg_replace('/[^A-Za-z0-9_-]+/', '', $cab['folio'] ?? "id{$id}");
