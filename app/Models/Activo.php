@@ -87,6 +87,8 @@ class Activo
         $solo_rentec          = $filtros['solo_rentec']          ?? false;
         $stock_usuario_tipo   = $filtros['stock_usuario_tipo']   ?? null;
         $identificador_exacto = $filtros['identificador_exacto'] ?? null;
+        $orden_campo = $filtros['orden_campo'] ?? 'ingreso';
+        $orden_dir   = (($filtros['orden_dir'] ?? 'desc') === 'asc') ? 'ASC' : 'DESC';
 
         // OJO: aquí no debe entrar ningún JOIN 1:N. `area_modelo` y
         // `bodega_acceso_plaza` lo son, y al unirlos multiplicaban la fila del
@@ -250,7 +252,7 @@ class Activo
                     tu.nombre  AS tienda_uso_nombre,
                     tp.nombre  AS procedencia_nombre
                 {$sqlBase}
-                ORDER BY a.id DESC
+                ORDER BY " . $this->columnaOrden($orden_campo) . " {$orden_dir}, a.id DESC
                 LIMIT :limit OFFSET :offset";
 
         $stmt = $this->conn->prepare($sql);
@@ -273,6 +275,17 @@ class Activo
                 'por_pagina'       => $porPagina,
             ],
         ];
+    }
+
+    /** Columna real detrás de cada criterio de orden que acepta el listado. */
+    private function columnaOrden(string $campo): string
+    {
+        return match ($campo) {
+            'tipo'          => 'd.nombre',
+            'codigo_barras' => 'a.codigo_barras',
+            'serie'         => 'a.serie',
+            default         => 'a.fecha_alta', // 'ingreso'
+        };
     }
 
     /**
