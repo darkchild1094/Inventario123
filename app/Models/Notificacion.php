@@ -45,10 +45,10 @@ class Notificacion
             $valores = [];
             $params  = [];
             foreach ($activosIds as $i => $activoId) {
-                $valores[] = "(:nid, :aid{$i})";
+                $valores[] = "(:nid{$i}, :aid{$i})";
+                $params[":nid{$i}"] = $id;
                 $params[":aid{$i}"] = $activoId;
             }
-            $params[':nid'] = $id;
             $sql = "INSERT INTO notificacion_activo (notificacion_id, activo_id) VALUES "
                  . implode(',', $valores);
             $ins = $this->conn->prepare($sql);
