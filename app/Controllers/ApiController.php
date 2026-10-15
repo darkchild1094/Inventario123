@@ -297,6 +297,48 @@ class ApiController
         $this->json($activo);
     }
 
+    // GET ?action=predecesorActivo&id=<id>
+    // Detalle del activo: si este equipo entró por un reemplazo, aquí está el
+    // equipo que salió (su serie/código, fotos tal como quedaron, y cuándo se
+    // dio de alta y cuándo se retiró). Alcance: quien puede ver el activo actual.
+    public function predecesorActivo(): void
+    {
+        $id = (int) ($_GET['id'] ?? 0);
+        if ($id <= 0) $this->json(['success' => false, 'message' => 'ID inválido.'], 400);
+
+        $activo = (new Activo($this->db))->obtenerPorId($id);
+        if (!$activo) $this->json(['success' => false, 'message' => 'Activo no encontrado.'], 404);
+        if (!Permisos::puedeVerActivoConcreto($activo)) {
+            $this->json(['success' => false, 'message' => 'No tienes permiso para ver este activo.'], 403);
+        }
+
+        $entrada = null;
+        foreach ((new Movimiento($this->db))->porActivo($id) as $m) {
+            if (($m['evento'] ?? '') === 'reemplazo_entra') { $entrada = $m; break; }
+        }
+        if (!$entrada || empty($entrada['activo_relacionado_id'])) {
+            $this->json(['encontrado' => false]);
+        }
+
+        $anterior = (new Activo($this->db))->obtenerPorId((int) $entrada['activo_relacionado_id']);
+        if (!$anterior) {
+            $this->json(['encontrado' => false]);
+        }
+
+        $this->json([
+            'encontrado'        => true,
+            'serie'             => $anterior['serie'] ?? null,
+            'codigo_barras'     => $anterior['codigo_barras'] ?? null,
+            'dispositivo_nombre'=> $anterior['dispositivo_nombre'] ?? null,
+            'modelo_nombre'     => $anterior['modelo_nombre'] ?? null,
+            'foto_equipo'       => $anterior['foto_equipo'] ?? null,
+            'foto_serie'        => $anterior['foto_serie'] ?? null,
+            'foto_activo'       => $anterior['foto_activo'] ?? null,
+            'fecha_alta'        => $anterior['fecha_alta'] ?? null,
+            'fecha_retiro'      => $entrada['creado_en'] ?? null,
+        ]);
+    }
+
     // GET ?action=resolverSerie&serie=<q>[&tienda_id=X]
     // Ayuda al formulario "Movimiento en tienda": dada una serie/código exacto,
     // dice si el activo ya está en el stock personal del usuario (instalación =
