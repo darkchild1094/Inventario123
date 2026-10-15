@@ -214,6 +214,37 @@ class ProyectoRentec
     }
 
     /**
+     * Enlaza retroactivamente al proyecto los activos ya instalados (altas o
+     * reemplazos hechos antes de que existiera el folio, o sin indicarlo).
+     * Actualiza `activo.proyecto_rentec_id` y la(s) fila(s) de `movimiento`
+     * que los hacen contar como "instalados" del proyecto — sólo donde
+     * todavía está NULL, nunca pisa un proyecto ya asignado.
+     *
+     * @return int activos afectados
+     */
+    public function vincularActivos(int $proyectoId, array $activoIds): int
+    {
+        $activoIds = array_values(array_unique(array_map('intval', $activoIds)));
+        if (!$activoIds) return 0;
+        $ph = implode(',', array_fill(0, count($activoIds), '?'));
+
+        $stmtA = $this->conn->prepare(
+            "UPDATE activo SET proyecto_rentec_id = ? WHERE id IN ({$ph}) AND proyecto_rentec_id IS NULL"
+        );
+        $stmtA->execute(array_merge([$proyectoId], $activoIds));
+        $afectados = $stmtA->rowCount();
+
+        $stmtM = $this->conn->prepare(
+            "UPDATE movimiento SET proyecto_rentec_id = ?
+             WHERE activo_id IN ({$ph}) AND evento IN ('alta', 'reemplazo_entra')
+               AND proyecto_rentec_id IS NULL"
+        );
+        $stmtM->execute(array_merge([$proyectoId], $activoIds));
+
+        return $afectados;
+    }
+
+    /**
      * Cuánta huella dejó el proyecto. Si hay algo, no se puede borrar: las dos
      * claves foráneas que lo apuntan (activo.proyecto_rentec_id y
      * movimiento.proyecto_rentec_id) son ON DELETE RESTRICT, y con razón —

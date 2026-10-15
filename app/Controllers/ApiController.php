@@ -1894,6 +1894,26 @@ class ApiController
         $this->json(['success' => true, 'proyecto' => $model->obtenerCabecera($id)]);
     }
 
+    // POST ?action=rentecVincularActivos  {id (proyecto), activos: [int,...]}
+    // Corrección administrativa: engancha al proyecto equipo que ya se instaló
+    // (en el sistema) sin haberlo indicado en su momento. Sólo admin.
+    public function rentecVincularActivos(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::esAdmin()) {
+            $this->json(['success' => false, 'message' => 'Solo un administrador puede hacer este ajuste.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        $activos = array_map('intval', (array) ($b['activos'] ?? []));
+        $model = new ProyectoRentec($this->db);
+        if (!$model->obtenerCabecera($id)) {
+            $this->json(['success' => false, 'message' => 'Proyecto no encontrado.'], 404);
+        }
+        $afectados = $model->vincularActivos($id, $activos);
+        $this->json(['success' => true, 'afectados' => $afectados]);
+    }
+
     private function puedeVerRentec(array $cabecera, ProyectoRentec $model): bool
     {
         if (Permisos::esAdmin()) return true;
