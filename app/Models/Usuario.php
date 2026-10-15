@@ -159,7 +159,7 @@ class Usuario
         $ids = array_map(fn($u) => (int) $u['id'], $usuarios);
         $ph  = implode(',', array_fill(0, count($ids), '?'));
         $st  = $this->conn->prepare(
-            "SELECT s.usuario_id, a.id, a.serie, a.num_activo,
+            "SELECT s.usuario_id, a.id, a.serie, a.codigo_barras,
                     d.nombre AS dispositivo_nombre, mo.nombre AS modelo_nombre
              FROM stock s
              JOIN activo a ON a.stock_id = s.id
@@ -172,11 +172,11 @@ class Usuario
         $porUsuario = [];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $porUsuario[(int) $r['usuario_id']][] = [
-                'id'         => (int) $r['id'],
-                'tipo'       => $r['dispositivo_nombre'],
-                'modelo'     => $r['modelo_nombre'],
-                'serie'      => $r['serie'],
-                'num_activo' => $r['num_activo'],
+                'id'            => (int) $r['id'],
+                'tipo'          => $r['dispositivo_nombre'],
+                'modelo'        => $r['modelo_nombre'],
+                'serie'         => $r['serie'],
+                'codigo_barras' => $r['codigo_barras'],
             ];
         }
 
