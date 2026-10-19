@@ -20,6 +20,7 @@ use App\Models\InventarioBodega;
 use App\Models\InventarioTienda;
 use App\Models\ProyectoRentec;
 use App\Models\Notificacion;
+use App\Models\TransferenciaPendiente;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
 use App\Services\EnvioService;
@@ -473,6 +474,43 @@ class ApiController
         ];
     }
 
+    /**
+     * Crea el pendiente de alta administrativa y notifica a los admins y al
+     * ATI de la tienda destino — ver migración 038 / módulo "Transferencias".
+     */
+    private function crearTransferenciaPendiente(int $activoId, int $tiendaDestinoId, string $ubicacionAnterior): void
+    {
+        $tpId = (new TransferenciaPendiente($this->db))->crear($activoId, $tiendaDestinoId, $ubicacionAnterior);
+
+        $tienda = (new Tienda($this->db))->obtenerPorId($tiendaDestinoId);
+        $destinatarios = (new Usuario($this->db))->obtenerAdmins();
+        $atiId = (int) ($tienda['ati_usuario_id'] ?? 0);
+        if ($atiId > 0 && !in_array($atiId, array_column($destinatarios, 'id'), true)) {
+            if ($atiUsuario = (new Usuario($this->db))->obtenerPorId($atiId)) {
+                $destinatarios[] = $atiUsuario;
+            }
+        }
+        if (!$destinatarios) return;
+
+        $yo = Permisos::idUsuario();
+        $notifModel = new Notificacion($this->db);
+        foreach ($destinatarios as $d) {
+            $destId = (int) $d['id'];
+            if ($destId === $yo) continue;
+            $notifId = $notifModel->crear([
+                'usuario_destino_id' => $destId,
+                'de_usuario_id'      => $yo,
+                'direccion'          => 'transferencia_pendiente',
+                'lugar'              => $tienda['nombre'] ?? '',
+                'grupo_id'           => Movimiento::nuevoGrupoId(),
+            ], [$activoId]);
+            FirebaseNotifier::avisarNotificacion($destId, $notifId, [
+                'id' => $notifId, 'de_nombre' => '', 'direccion' => 'transferencia_pendiente',
+                'lugar' => $tienda['nombre'] ?? '', 'n_activos' => 1, 'creado_en' => date('c'),
+            ]);
+        }
+    }
+
     /** Texto de una línea con la ubicación actual del activo. */
     private function ubicacionCorta(array $a): string
     {
@@ -671,9 +709,17 @@ class ApiController
         }
 
         $post = array_merge($_POST, ['plaza_id' => $plazaId]);
+        $ubicacionAntes = $this->ubicacionCorta($existente);
         $res  = (new ActivoGuardado($this->db))->actualizar($id, $mover, $existente, $post, $this->actorSesion());
 
         if ($res['ok']) {
+            // El activo YA tenía num_activo (placa oficial FEMSA) y terminó
+            // instalado en una tienda: se movió solo, pero FEMSA no se entera
+            // sola — queda pendiente avisarle (alta administrativa fuera del
+            // sistema). Ver migración 038 / módulo "Transferencias".
+            if (($mover['status'] ?? '') === 'en_uso' && !empty($mover['tienda_uso_id']) && !empty($existente['num_activo'])) {
+                $this->crearTransferenciaPendiente($id, (int) $mover['tienda_uso_id'], $ubicacionAntes);
+            }
             $this->json([
                 'success' => true,
                 'id'      => $id,
@@ -1776,6 +1822,71 @@ class ApiController
         }
         $model->cancelar($id);
         $this->json(['success' => true]);
+    }
+
+    // ── Auditoría: resultados de los checklists de tienda ya cerrados ───────
+    // Solo admin por ahora (ver módulo "Auditoría" en Permisos::MODULOS_POR_ROL).
+
+    // GET ?action=auditoriasListar
+    public function auditoriasListar(): void
+    {
+        if (!Permisos::esAdmin()) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $this->json(['auditorias' => (new InventarioTienda($this->db))->listarCerradas()]);
+    }
+
+    // GET ?action=auditoriaDetalle&id=
+    public function auditoriaDetalle(): void
+    {
+        if (!Permisos::esAdmin()) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $id = (int) ($_GET['id'] ?? 0);
+        $detalle = (new InventarioTienda($this->db))->obtenerDetalle($id);
+        if (!$detalle) $this->json(['success' => false, 'message' => 'No encontrada.'], 404);
+        $this->json($detalle);
+    }
+
+    // ── Transferencias: altas administrativas pendientes con FEMSA ──────────
+    // Admin y ATI (ver migración 038 / crearTransferenciaPendiente).
+
+    private function puedeVerTransferencias(): bool
+    {
+        return in_array(Permisos::tipo(), ['admin', 'ati'], true);
+    }
+
+    // GET ?action=transferenciasListar&completado=0|1
+    public function transferenciasListar(): void
+    {
+        if (!$this->puedeVerTransferencias()) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $completado = !empty($_GET['completado']);
+        $plazaIds = Permisos::esAdmin() ? null : Permisos::misPlazas();
+        $this->json(['transferencias' => (new TransferenciaPendiente($this->db))->listar($completado, $plazaIds)]);
+    }
+
+    // POST ?action=transferenciaCompletar  id=
+    public function transferenciaCompletar(): void
+    {
+        $this->requerirPost();
+        if (!$this->puedeVerTransferencias()) {
+            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int) ($b['id'] ?? 0);
+        $model = new TransferenciaPendiente($this->db);
+        $t = $model->obtener($id);
+        if (!$t) $this->json(['success' => false, 'message' => 'No encontrada.'], 404);
+        if (!Permisos::esAdmin()) {
+            $tienda = (new Tienda($this->db))->obtenerPorId((int) $t['tienda_destino_id']);
+            if (!$tienda || !in_array((int) $tienda['plaza_id'], Permisos::misPlazas(), true)) {
+                $this->json(['success' => false, 'message' => 'Esa tienda no está entre las tuyas.'], 403);
+            }
+        }
+        $ok = $model->completar($id, Permisos::idUsuario());
+        $this->json(['success' => $ok, 'message' => $ok ? 'Marcada como completada.' : 'Ya estaba completada.']);
     }
 
     // ── RENTEC: proyectos de Renovación Tecnológica ─────────────────────────

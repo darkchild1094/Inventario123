@@ -366,6 +366,7 @@ class Permisos
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
             ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
+            ['clave' => 'transferencias', 'etiqueta' => 'Transferencias', 'icono' => 'fa-truck-ramp-box', 'editable' => true],
         ],
         // pfs: lo suyo y las tiendas donde trabaja. NO ve Bodega — el equipo de
         // bodega no es asunto suyo hasta que alguien se lo asigna, y para
@@ -391,6 +392,8 @@ class Permisos
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
             ['clave' => 'usuarios',  'etiqueta' => 'Usuarios',    'icono' => 'fa-users-cog',           'editable' => true],
             ['clave' => 'apk',       'etiqueta' => 'Actualizar app', 'icono' => 'fa-mobile-screen-button', 'editable' => true],
+            ['clave' => 'auditoria', 'etiqueta' => 'Auditoría',   'icono' => 'fa-clipboard-check',     'editable' => false],
+            ['clave' => 'transferencias', 'etiqueta' => 'Transferencias', 'icono' => 'fa-truck-ramp-box', 'editable' => true],
         ],
     ];
 
@@ -426,7 +429,7 @@ class Permisos
      * panel web no tiene vista equivalente). Sin filtrarlos, el navbar web
      * mostraría un link roto (controller inexistente).
      */
-    private const MODULOS_SOLO_APP = ['movimientos', 'stock_usuarios'];
+    private const MODULOS_SOLO_APP = ['movimientos', 'stock_usuarios', 'auditoria', 'transferencias'];
 
     /** modulos(), sin los que son exclusivos de la app. Lo que ve el panel web. */
     public static function modulosWeb(): array

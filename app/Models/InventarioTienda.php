@@ -74,6 +74,23 @@ class InventarioTienda
         }
     }
 
+    /** Auditorías cerradas, más reciente primero — módulo "Auditoría" (solo admin). */
+    public function listarCerradas(): array
+    {
+        $stmt = $this->conn->prepare(
+            "SELECT it.id, it.tienda_id, t.nombre AS tienda_nombre, t.cr_tienda,
+                    it.usuario_id, u.nombre AS usuario_nombre,
+                    it.total_esperado, it.total_encontrado, it.creado_en, it.cerrado_en
+             FROM inventario_tienda it
+             JOIN tienda t ON t.id = it.tienda_id
+             JOIN usuario u ON u.id = it.usuario_id
+             WHERE it.estado = 'cerrado'
+             ORDER BY it.cerrado_en DESC"
+        );
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     /** Cabecera + detalle con datos del activo (clave "detalle"). */
     public function obtenerDetalle(int $inventarioId): array
     {
