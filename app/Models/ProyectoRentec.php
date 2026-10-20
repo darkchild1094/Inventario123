@@ -207,6 +207,18 @@ class ProyectoRentec
              WHERE m.proyecto_rentec_id = :id
                AND m.evento NOT IN ('alta', 'reemplazo_entra')
                AND m.activo_relacionado_id IS NULL
+               -- Sin esto, el propio equipo que ENTRA sale dos veces: una vez
+               -- como 'reemplazo_entra' (correcto) y otra como el 'cambio_status'
+               -- genérico que ActivoGuardado::actualizar() siempre registra
+               -- para el activo que está actualizando, aunque sea un reemplazo.
+               -- Ese segundo registro no es un retiro de nada: es el mismo
+               -- activo que ya aparece instalado en este mismo proyecto.
+               AND NOT EXISTS (
+                   SELECT 1 FROM movimiento m2
+                   WHERE m2.activo_id = m.activo_id
+                     AND m2.proyecto_rentec_id = m.proyecto_rentec_id
+                     AND m2.evento IN ('alta', 'reemplazo_entra')
+               )
              ORDER BY m.creado_en DESC"
         );
         $retirados->bindParam(':id', $id, PDO::PARAM_INT);
