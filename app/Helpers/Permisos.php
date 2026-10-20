@@ -252,62 +252,8 @@ class Permisos
         return in_array(self::tipo(), ['admin', 'coordinador', 'pfs', 'ati'], true);
     }
 
-    /** @deprecated Lo reemplaza puedeTransferir(). Vive mientras los APK viejos llamen a los endpoints de solicitudes. */
-    public static function puedeCrearSolicitudTraslado(): bool { return self::puedeTransferir(); }
-    /** @deprecated Igual que arriba. */
-    public static function puedeAprobarTraslados(): bool
-    {
-        return in_array(self::tipo(), ['coordinador', 'ati', 'admin'], true);
-    }
-    /** @deprecated Igual que arriba. */
-    public static function puedeVerTraslados(): bool { return self::puedeTransferir(); }
-
     /** "Enviar" (Bodega↔Mi stock↔usuario) — inmediato, sin aceptación. Mismo alcance que puedeTransferir(). */
     public static function puedeEnviar(): bool { return self::puedeTransferir(); }
-
-    /**
-     * Matriz de firma — ÚNICA fuente de verdad de "¿qué slot de firma le toca a
-     * este usuario en esta solicitud?". Devuelve 1, 2 o null (no le toca).
-     *
-     *   destino     slot 1              slot 2
-     *   ─────────────────────────────────────────────────────
-     *   asignado    quien recibe        —
-     *   en_bodega   coordinador|admin   —
-     *   baja        ati|admin           —
-     *   garantia    ati|admin           coordinador|admin
-     *
-     * Antes vivía duplicada en ApiController::slotDeUsuario() y en
-     * SolicitudTrasladoController::slotDeUsuario(), más una tercera copia
-     * inservible aquí (puedeAprobarDestino/rolAprobacion/plazasParaAprobar).
-     */
-    public static function slotDeFirma(array $sol): ?int
-    {
-        if (($sol['estado'] ?? '') !== 'pendiente') return null;
-
-        $uid     = self::idUsuario();
-        $tipo    = self::tipo();
-        $enPlaza = self::esAdmin() || in_array((int) ($sol['plaza_id'] ?? 0), self::misPlazas(), true);
-
-        return match ($sol['destino'] ?? '') {
-            'asignado'  => ((int) ($sol['destino_usuario_id'] ?? 0) === $uid && empty($sol['aprobador_id'])) ? 1 : null,
-            'en_bodega' => ($enPlaza && in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null,
-            'baja'      => ($enPlaza && in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])) ? 1 : null,
-            'garantia'  => match (true) {
-                !$enPlaza => null,
-                in_array($tipo, ['ati', 'admin'], true) && empty($sol['aprobador_id'])          => 1,
-                in_array($tipo, ['coordinador', 'admin'], true) && empty($sol['aprobador2_id']) => 2,
-                default   => null,
-            },
-            default     => null,
-        };
-    }
-
-    /** El nombre del slot con el que se guarda la firma (columna firma_aprobador*). */
-    public static function rolDeFirma(string $destino, int $slot): string
-    {
-        if ($destino !== 'garantia') return 'unico';
-        return $slot === 1 ? 'ati' : 'coordinador';
-    }
 
     /**
      * Scope del Historial:

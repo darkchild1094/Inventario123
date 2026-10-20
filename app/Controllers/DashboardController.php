@@ -4,7 +4,6 @@ namespace App\Controllers;
 
 use App\Models\Activo;
 use App\Models\Movimiento;
-use App\Models\SolicitudTraslado;
 use App\Models\Tienda;
 use App\Models\Usuario;
 use App\Models\Modelo;
@@ -48,15 +47,6 @@ class DashboardController
 
         $movs = (new Movimiento($this->db))
             ->listar(Permisos::filtrosHistorial(), 1, 8)['movimientos'] ?? [];
-
-        // Traslados pendientes (coordinador / admin).
-        $pendTraslados = 0;
-        if (in_array($tipo, ['coordinador', 'admin'], true)) {
-            $st = new SolicitudTraslado($this->db);
-            $pendTraslados = $tipo === 'admin'
-                ? $st->contarPendientesTodas()
-                : $st->contarPendientesPorPlazas(Permisos::misPlazas());
-        }
 
         // Contadores de catálogo (solo admin).
         $extras = [];

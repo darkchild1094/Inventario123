@@ -11,20 +11,6 @@ $act       = $_GET['action']     ?? 'index';
 $navActivo = $navActivo ?? '';
 $esDash    = $navActivo === 'dashboard' || ($ctrl === '' && $vistaAc === '' && $act === 'index');
 
-// Traslados pendientes (badge en la barra lateral).
-$pendTraslados = 0;
-if (in_array($tipo, ['coordinador', 'admin'], true)) {
-    global $db;
-    if (isset($db) && $db instanceof \PDO) {
-        try {
-            $stm = new \App\Models\SolicitudTraslado($db);
-            $pendTraslados = $tipo === 'admin'
-                ? $stm->contarPendientesTodas()
-                : $stm->contarPendientesPorPlazas(\App\Helpers\Permisos::misPlazas());
-        } catch (\Throwable $e) { $pendTraslados = 0; }
-    }
-}
-
 $nombreUsuario = $_SESSION['usuario']['nombre'] ?? 'Usuario';
 $fotoUsuario   = $_SESSION['usuario']['foto']   ?? null;
 $plazaUsuario  = $_SESSION['usuario']['plaza_nombre'] ?? '';
@@ -145,15 +131,6 @@ $badgeColor = match ($tipo) {
         <?php if (in_array($tipo, ['admin', 'coordinador', 'pfs', 'ati'], true)): ?>
             <a class="<?= $ctrl === 'historial' ? 'active' : '' ?>" href="index.php?controller=historial&action=index">
                 <i class="fas fa-clock-rotate-left"></i> Historial
-            </a>
-        <?php endif; ?>
-
-        <?php if (in_array($tipo, ['pfs', 'coordinador', 'admin', 'ati'], true)): ?>
-            <a class="<?= $ctrl === 'solicitud' ? 'active' : '' ?>" href="index.php?controller=solicitud&action=index">
-                <i class="fas fa-right-left"></i> Traslados
-                <?php if ($pendTraslados > 0): ?>
-                    <span class="badge rounded-pill bg-warning text-dark"><?= (int) $pendTraslados ?></span>
-                <?php endif; ?>
             </a>
         <?php endif; ?>
 

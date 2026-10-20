@@ -205,10 +205,6 @@ switch ($controllerName) {
         $controller = new \App\Controllers\ModeloController($db);
         break;
 
-    case 'solicitud':
-        $controller = new \App\Controllers\SolicitudTrasladoController($db);
-        break;
-
     case 'apk':
         $controller = new \App\Controllers\ApkController($db);
         break;

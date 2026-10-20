@@ -15,7 +15,6 @@ use App\Models\Negocio;
 use App\Models\Bodega;
 use App\Models\Stock;
 use App\Models\Movimiento;
-use App\Models\SolicitudTraslado;
 use App\Models\InventarioBodega;
 use App\Models\InventarioTienda;
 use App\Models\ProyectoRentec;
@@ -131,10 +130,6 @@ class ApiController
 
         // Bloque técnico para admin (salud del sistema y catálogo).
         if (Permisos::esAdmin()) {
-            $solPorEstado = array_fill_keys(array_keys(SolicitudTraslado::ESTADOS), 0);
-            foreach ($this->db->query("SELECT estado, COUNT(*) n FROM solicitud_traslado GROUP BY estado") as $r) {
-                $solPorEstado[$r['estado']] = (int) $r['n'];
-            }
             // activo.modelo_id es NOT NULL, así que el viejo "activos sin modelo"
             // siempre daba 0. Lo que sí puede pasar es que apunte a un modelo
             // borrado o sin marca: eso es lo que vale la pena vigilar.
@@ -148,7 +143,6 @@ class ApiController
                 'tiendas'              => count((new Tienda($this->db))->obtenerTodas()),
                 'modelos'             => count((new Modelo($this->db))->obtenerTodos()),
                 'bodegas'             => count((new Bodega($this->db))->obtenerTodas()),
-                'solicitudes_por_estado' => $solPorEstado,
                 'activos_sin_modelo'  => $sinModelo,
             ];
         }

@@ -199,15 +199,7 @@ class ActivoGuardado
         $tipo    = $actor['tipo'] ?? '';
 
         if ($antes !== null && !empty($antes['id'])) {
-            // 1) Activo con una solicitud de movimiento 'pendiente' → bloqueado
-            //    hasta que se resuelva (aprobar / rechazar / cancelar).
-            $enPendiente = (new \App\Models\SolicitudTraslado($this->db))
-                ->activosEnSolicitudPendiente([(int) $antes['id']]);
-            if ($enPendiente) {
-                return $this->err('Este activo tiene una solicitud de movimiento pendiente; no se puede modificar hasta resolverla.');
-            }
-
-            // 2) Cambio de custodia → exige Solicitud firmada. La regla vive en
+            // Cambio de custodia → exige Solicitud firmada. La regla vive en
             //    requiereSolicitudFirmada() para que el reemplazo la aplique
             //    también (antes el reemplazo la esquivaba por completo).
             // El dueño destino que se evalúa tiene que ser el EFECTIVO, el mismo

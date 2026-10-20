@@ -164,17 +164,6 @@ $maxPlaza  = max(1, ...array_map(fn($d) => $d['n'], $resumen['por_plaza'] ?: [['
                             <a href="index.php?controller=export&action=inventario" class="btn btn-outline-secondary text-start"><i class="fas fa-file-excel me-2 text-success"></i>Exportar a Excel</a>
                         </div>
                     <?php endif; ?>
-
-                    <?php if (in_array($tipo, ['coordinador', 'admin'], true)): ?>
-                        <a href="index.php?controller=solicitud&action=index"
-                           class="d-flex align-items-center justify-content-between mt-3 p-2 rounded text-decoration-none
-                                  <?= $pendTraslados > 0 ? 'bg-warning-subtle text-dark' : 'bg-light text-muted' ?>">
-                            <span><i class="fas fa-right-left me-2"></i>Traslados pendientes de aprobar</span>
-                            <span class="badge rounded-pill bg-<?= $pendTraslados > 0 ? 'warning text-dark' : 'secondary' ?>">
-                                <?= (int) $pendTraslados ?>
-                            </span>
-                        </a>
-                    <?php endif; ?>
                 </div>
             </div>
         </div>
