@@ -74,20 +74,30 @@ class InventarioTienda
         }
     }
 
-    /** Auditorías cerradas, más reciente primero — módulo "Auditoría" (solo admin). */
-    public function listarCerradas(): array
+    /** Auditorías cerradas, más reciente primero — módulo "Auditoría". $plazaIds null = todas (admin). */
+    public function listarCerradas(?array $plazaIds = null): array
     {
-        $stmt = $this->conn->prepare(
-            "SELECT it.id, it.tienda_id, t.nombre AS tienda_nombre, t.cr_tienda,
-                    it.usuario_id, u.nombre AS usuario_nombre,
-                    it.total_esperado, it.total_encontrado, it.creado_en, it.cerrado_en
-             FROM inventario_tienda it
-             JOIN tienda t ON t.id = it.tienda_id
-             JOIN usuario u ON u.id = it.usuario_id
-             WHERE it.estado = 'cerrado'
-             ORDER BY it.cerrado_en DESC"
-        );
-        $stmt->execute();
+        $sql = "SELECT it.id, it.tienda_id, t.nombre AS tienda_nombre, t.cr_tienda,
+                       it.usuario_id, u.nombre AS usuario_nombre,
+                       it.total_esperado, it.total_encontrado, it.creado_en, it.cerrado_en
+                FROM inventario_tienda it
+                JOIN tienda t ON t.id = it.tienda_id
+                JOIN usuario u ON u.id = it.usuario_id
+                WHERE it.estado = 'cerrado'";
+        $params = [];
+        if ($plazaIds !== null) {
+            if (!$plazaIds) return [];
+            $ph = [];
+            foreach (array_values($plazaIds) as $i => $pid) {
+                $key = ":p{$i}";
+                $ph[] = $key;
+                $params[$key] = $pid;
+            }
+            $sql .= " AND t.plaza_id IN (" . implode(',', $ph) . ")";
+        }
+        $sql .= " ORDER BY it.cerrado_en DESC";
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

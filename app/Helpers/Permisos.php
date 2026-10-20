@@ -231,6 +231,16 @@ class Permisos
         return in_array(self::tipo(), ['coordinador', 'admin'], true);
     }
 
+    /**
+     * Crear, borrar o finalizar un proyecto RENTEC (el folio en sí, no el
+     * equipo dentro de él): pfs NO puede — sólo instalar lo que ya existe en
+     * el folio. El resto de roles sí administra el proyecto.
+     */
+    public static function puedeGestionarProyectoRentec(): bool
+    {
+        return self::tipo() !== 'pfs';
+    }
+
     // ── Transferencia de equipo entre personas ───────────────────────────────
     // Lo único que ya no se puede hacer directo es entregarle equipo a otra
     // persona: se manda y el que recibe lo acepta. Mover de lugar (tienda,
@@ -355,6 +365,7 @@ class Permisos
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
             ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
+            ['clave' => 'auditoria', 'etiqueta' => 'Auditoría',   'icono' => 'fa-clipboard-check',     'editable' => false],
         ],
         'ati' => [
             ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
@@ -366,6 +377,7 @@ class Permisos
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => false],
             ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
+            ['clave' => 'auditoria', 'etiqueta' => 'Auditoría',   'icono' => 'fa-clipboard-check',     'editable' => false],
             ['clave' => 'transferencias', 'etiqueta' => 'Transferencias', 'icono' => 'fa-truck-ramp-box', 'editable' => true],
         ],
         // pfs: lo suyo y las tiendas donde trabaja. NO ve Bodega — el equipo de
@@ -378,6 +390,7 @@ class Permisos
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
             ['clave' => 'rentec',    'etiqueta' => 'RENTEC',      'icono' => 'fa-arrows-rotate',       'editable' => true],
             ['clave' => 'movimientos', 'etiqueta' => 'Movimientos', 'icono' => 'fa-clock-rotate-left', 'editable' => false],
+            ['clave' => 'auditoria', 'etiqueta' => 'Auditoría',   'icono' => 'fa-clipboard-check',     'editable' => false],
         ],
         'admin' => [
             ['clave' => 'dashboard', 'etiqueta' => 'Inicio',      'icono' => 'fa-gauge-high',          'editable' => false],
@@ -385,7 +398,6 @@ class Permisos
             ['clave' => 'mi_stock',  'etiqueta' => 'Mi Stock',    'icono' => 'fa-toolbox',             'editable' => true],
             ['clave' => 'bodega',    'etiqueta' => 'Bodega',      'icono' => 'fa-warehouse',           'editable' => true],
             ['clave' => 'rentec',    'etiqueta' => 'RENTEC',      'icono' => 'fa-arrows-rotate',       'editable' => true],
-            ['clave' => 'ati',       'etiqueta' => 'ATI',         'icono' => 'fa-user-gear',           'editable' => true],
             ['clave' => 'stock_pfs', 'etiqueta' => 'Stock PFS',   'icono' => 'fa-people-carry-box',    'editable' => true],
             ['clave' => 'stock_usuarios', 'etiqueta' => 'Stock usuarios', 'icono' => 'fa-people-group',   'editable' => false],
             ['clave' => 'tiendas',   'etiqueta' => 'Tiendas',     'icono' => 'fa-store',               'editable' => true],
@@ -393,7 +405,6 @@ class Permisos
             ['clave' => 'usuarios',  'etiqueta' => 'Usuarios',    'icono' => 'fa-users-cog',           'editable' => true],
             ['clave' => 'apk',       'etiqueta' => 'Actualizar app', 'icono' => 'fa-mobile-screen-button', 'editable' => true],
             ['clave' => 'auditoria', 'etiqueta' => 'Auditoría',   'icono' => 'fa-clipboard-check',     'editable' => false],
-            ['clave' => 'transferencias', 'etiqueta' => 'Transferencias', 'icono' => 'fa-truck-ramp-box', 'editable' => true],
         ],
     ];
 
@@ -412,7 +423,7 @@ class Permisos
      * abrirlo cae en el listado genérico de activos (no hay pantalla para
      * 'apk'), mostrando TODOS los activos del sistema sin ningún filtro.
      */
-    private const MODULOS_SOLO_WEB = ['apk', 'stock_pfs', 'ati'];
+    private const MODULOS_SOLO_WEB = ['apk', 'stock_pfs'];
 
     /** modulos(), sin los que son exclusivos del panel web. Lo que ve la app. */
     public static function modulosApp(): array
@@ -486,7 +497,6 @@ class Permisos
             // El módulo trata igual a pfs, coordinador y admin (ver
             // Usuario::obtenerStockPersonalModuloPfs) — nunca a otro ati.
             'stock_pfs' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => ['pfs', 'coordinador', 'admin']]),
-            'ati'       => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => 'ati']),
             'stock_usuarios' => array_merge(self::scopePlazas(), ['stock_usuario_tipo' => ['admin', 'coordinador', 'pfs', 'ati']]),
             'rentec'    => array_merge(self::scopePlazas(), ['solo_rentec' => true]),
             default     => self::filtrosScope(),

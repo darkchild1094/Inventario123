@@ -69,6 +69,7 @@ class ApiController
                 'puedeGestionarTiendas' => Permisos::puedeGestionarTiendas(),
                 'puedeGestionarModelos' => Permisos::puedeGestionarModelos(),
                 'puedeRecibirRentec'    => Permisos::puedeRecibirRentec(),
+                'puedeGestionarRentec'  => Permisos::puedeGestionarProyectoRentec(),
                 'puedeEnviar'           => Permisos::puedeEnviar(),
                 'plazaId'               => Permisos::plazaId(),
                 'plazasIds'             => Permisos::plazasIds(),
@@ -257,7 +258,7 @@ class ApiController
         // listan stock de OTRAS personas: en 'mi_stock' el dueño es siempre el
         // propio usuario y aceptarlo aquí dejaría a un pfs ver stock ajeno.
         $usuarioGet = (int) ($_GET['usuario_id'] ?? 0);
-        if ($usuarioGet > 0 && in_array($modulo, ['stock_pfs', 'ati'], true)) {
+        if ($usuarioGet > 0 && $modulo === 'stock_pfs') {
             if (!$esAdmin && !$this->usuarioEnAlcance($usuarioGet, $misPlazas)) {
                 $this->json(['success' => false, 'message' => 'Ese usuario no pertenece a tu plaza.'], 403);
             }
@@ -1830,22 +1831,24 @@ class ApiController
     // GET ?action=auditoriasListar
     public function auditoriasListar(): void
     {
-        if (!Permisos::esAdmin()) {
-            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
-        }
-        $this->json(['auditorias' => (new InventarioTienda($this->db))->listarCerradas()]);
+        $plazaIds = Permisos::esAdmin() ? null : Permisos::misPlazas();
+        $this->json(['auditorias' => (new InventarioTienda($this->db))->listarCerradas($plazaIds)]);
     }
 
     // GET ?action=auditoriaDetalle&id=
     public function auditoriaDetalle(): void
     {
-        if (!Permisos::esAdmin()) {
-            $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
-        }
         $id = (int) ($_GET['id'] ?? 0);
-        $detalle = (new InventarioTienda($this->db))->obtenerDetalle($id);
-        if (!$detalle) $this->json(['success' => false, 'message' => 'No encontrada.'], 404);
-        $this->json($detalle);
+        $model = new InventarioTienda($this->db);
+        $cab = $model->obtenerCabecera($id);
+        if (!$cab) $this->json(['success' => false, 'message' => 'No encontrada.'], 404);
+        if (!Permisos::esAdmin()) {
+            $tienda = (new Tienda($this->db))->obtenerPorId((int) $cab['tienda_id']);
+            if (!$tienda || !in_array((int) $tienda['plaza_id'], Permisos::misPlazas(), true)) {
+                $this->json(['success' => false, 'message' => 'Sin acceso.'], 403);
+            }
+        }
+        $this->json($model->obtenerDetalle($id));
     }
 
     // ── Transferencias: altas administrativas pendientes con FEMSA ──────────
@@ -1853,7 +1856,7 @@ class ApiController
 
     private function puedeVerTransferencias(): bool
     {
-        return in_array(Permisos::tipo(), ['admin', 'ati'], true);
+        return Permisos::tipo() === 'ati';
     }
 
     // GET ?action=transferenciasListar&completado=0|1
@@ -1907,6 +1910,9 @@ class ApiController
     public function rentecCrear(): void
     {
         $this->requerirPost();
+        if (!Permisos::puedeGestionarProyectoRentec()) {
+            $this->json(['success' => false, 'message' => 'No puedes crear proyectos RENTEC; sí puedes instalar lo que ya exista en un folio.'], 403);
+        }
         $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $nombre = trim((string) ($b['nombre'] ?? ''));
         if ($nombre === '') {
@@ -1946,6 +1952,9 @@ class ApiController
         $b  = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $id = (int) ($b['id'] ?? 0);
 
+        if (!Permisos::puedeGestionarProyectoRentec()) {
+            $this->json(['success' => false, 'message' => 'No puedes borrar proyectos RENTEC.'], 403);
+        }
         $model = new ProyectoRentec($this->db);
         $cab   = $model->obtenerCabecera($id);
         if (!$cab || !$this->puedeVerRentec($cab, $model)) {
@@ -1996,6 +2005,9 @@ class ApiController
     public function rentecCerrar(): void
     {
         $this->requerirPost();
+        if (!Permisos::puedeGestionarProyectoRentec()) {
+            $this->json(['success' => false, 'message' => 'No puedes finalizar proyectos RENTEC.'], 403);
+        }
         $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $id = (int) ($b['id'] ?? 0);
         $model = new ProyectoRentec($this->db);
