@@ -788,6 +788,85 @@ class ApiController
         }
     }
 
+    /**
+     * POST ?action=eliminarCategoriaDispositivo  dispositivo_ids: [int,...]
+     * Mantenimiento de catálogo (solo admin): borra por completo un tipo de
+     * dispositivo obsoleto — sus modelos Y todos sus activos ya registrados,
+     * limpiando antes las referencias que sí tienen FK restrictiva
+     * (inventario_tienda_detalle, inventario_bodega_detalle,
+     * notificacion_activo, transferencia_pendiente) para no dejarlo a medias.
+     * Cada activo borrado deja snapshot en `movimiento` (evento 'eliminacion'),
+     * igual que un borrado individual — solo que aquí son muchos de golpe.
+     */
+    public function eliminarCategoriaDispositivo(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::esAdmin()) {
+            $this->json(['success' => false, 'message' => 'Solo un administrador puede hacer esto.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $dispIds = array_values(array_unique(array_map('intval', (array) ($b['dispositivo_ids'] ?? []))));
+        if (!$dispIds) {
+            $this->json(['success' => false, 'message' => 'Falta dispositivo_ids.'], 400);
+        }
+
+        $activoModel = new Activo($this->db);
+        $mov = new MovimientoService($this->db);
+        $actorId = Permisos::idUsuario();
+        $resumen = ['dispositivos' => [], 'activos_borrados' => 0, 'modelos_borrados' => 0, 'dispositivos_borrados' => 0];
+
+        foreach ($dispIds as $dispId) {
+            $dispRow = $this->db->prepare('SELECT id, nombre FROM dispositivo WHERE id = :id');
+            $dispRow->execute([':id' => $dispId]);
+            $disp = $dispRow->fetch(PDO::FETCH_ASSOC);
+            if (!$disp) continue;
+
+            $modelosStmt = $this->db->prepare('SELECT id FROM modelo WHERE dispositivo_id = :id');
+            $modelosStmt->execute([':id' => $dispId]);
+            $modeloIds = array_map('intval', array_column($modelosStmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+
+            $borradosDeEste = 0;
+            if ($modeloIds) {
+                $ph = implode(',', array_fill(0, count($modeloIds), '?'));
+                $activosStmt = $this->db->prepare("SELECT id FROM activo WHERE modelo_id IN ({$ph})");
+                $activosStmt->execute($modeloIds);
+                $activoIds = array_map('intval', array_column($activosStmt->fetchAll(PDO::FETCH_ASSOC), 'id'));
+
+                foreach ($activoIds as $aid) {
+                    $activo = $activoModel->obtenerPorId($aid);
+                    if (!$activo) continue;
+                    $mov->registrarEliminacion($activo, $actorId);
+                    foreach ([
+                        'inventario_tienda_detalle', 'inventario_bodega_detalle',
+                        'notificacion_activo', 'transferencia_pendiente',
+                    ] as $tabla) {
+                        $this->db->prepare("DELETE FROM {$tabla} WHERE activo_id = :id")->execute([':id' => $aid]);
+                    }
+                    if ($activoModel->eliminar($aid)) $borradosDeEste++;
+                }
+            }
+
+            $modeloModel = new Modelo($this->db);
+            $modelosBorrados = 0;
+            foreach ($modeloIds as $mid) {
+                if ($modeloModel->eliminar($mid)) $modelosBorrados++;
+            }
+
+            $dispBorrado = (bool) $this->db->prepare('DELETE FROM dispositivo WHERE id = :id')->execute([':id' => $dispId]);
+
+            $resumen['dispositivos'][] = [
+                'id' => $dispId, 'nombre' => $disp['nombre'],
+                'activos_borrados' => $borradosDeEste, 'modelos_borrados' => $modelosBorrados,
+                'dispositivo_borrado' => $dispBorrado,
+            ];
+            $resumen['activos_borrados'] += $borradosDeEste;
+            $resumen['modelos_borrados'] += $modelosBorrados;
+            if ($dispBorrado) $resumen['dispositivos_borrados']++;
+        }
+
+        $this->json(['success' => true] + $resumen);
+    }
+
     // ── Usuarios ──────────────────────────────────────────────────────────────
 
     public function listarUsuarios(): void
