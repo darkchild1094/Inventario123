@@ -868,6 +868,55 @@ class ApiController
         $this->json(['success' => true] + $resumen);
     }
 
+    /**
+     * POST ?action=importarActivosLote
+     * activos: [{serie, codigo_barras, num_activo, modelo_id, tienda_id, plaza_id}, ...]
+     * Alta masiva (solo admin) para cargas desde el Excel oficial de FEMSA
+     * (MAF): a diferencia del alta normal de la app, aquí SÍ se acepta
+     * num_activo directo en la entrada (viene de la fuente oficial, no lo
+     * inventa nadie). Reusa ActivoGuardado::crear() uno por uno para que cada
+     * alta pase por las mismas reglas (stock, movimiento, etc.) que una alta
+     * normal; nunca se arma SQL a mano ni se borra nada.
+     */
+    public function importarActivosLote(): void
+    {
+        $this->requerirPost();
+        if (!Permisos::esAdmin()) {
+            $this->json(['success' => false, 'message' => 'Solo un administrador puede hacer esto.'], 403);
+        }
+        $b = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $items = (array) ($b['activos'] ?? []);
+        if (!$items) $this->json(['success' => false, 'message' => 'Falta activos.'], 400);
+
+        $servicio = new ActivoGuardado($this->db);
+        $actor = $this->actorSesion();
+        $ok = 0; $errores = [];
+
+        foreach ($items as $i => $it) {
+            $tiendaId = (int) ($it['tienda_id'] ?? 0);
+            $plazaId  = (int) ($it['plaza_id'] ?? 0);
+            if ($tiendaId <= 0 || $plazaId <= 0) {
+                $errores[] = ['i' => $i, 'serie' => $it['serie'] ?? null, 'error' => 'Falta tienda_id/plaza_id.'];
+                continue;
+            }
+            $datos = [
+                'serie' => trim((string) ($it['serie'] ?? '')) ?: null,
+                'codigo_barras' => trim((string) ($it['codigo_barras'] ?? '')) ?: null,
+                'num_activo' => trim((string) ($it['num_activo'] ?? '')) ?: null,
+                'modelo_id' => !empty($it['modelo_id']) ? (int) $it['modelo_id'] : null,
+                'status' => 'en_uso',
+                'procedencia_tienda_id' => null,
+                'tienda_uso_id' => $tiendaId,
+            ];
+            $post = ['motivo' => $it['motivo'] ?? 'Importado del catálogo oficial FEMSA (MAF)', 'plaza_id' => $plazaId];
+            $res = $servicio->crear($datos, $post, $actor);
+            if ($res['ok']) $ok++;
+            else $errores[] = ['i' => $i, 'serie' => $it['serie'] ?? null, 'num_activo' => $it['num_activo'] ?? null, 'error' => $res['error']];
+        }
+
+        $this->json(['success' => true, 'creados' => $ok, 'fallidos' => count($errores), 'errores' => $errores]);
+    }
+
     // ── Usuarios ──────────────────────────────────────────────────────────────
 
     public function listarUsuarios(): void
