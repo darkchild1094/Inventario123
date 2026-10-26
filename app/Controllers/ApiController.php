@@ -20,6 +20,7 @@ use App\Models\InventarioTienda;
 use App\Models\ProyectoRentec;
 use App\Models\Notificacion;
 use App\Models\TransferenciaPendiente;
+use PDO;
 use App\Services\ActivoGuardado;
 use App\Services\MovimientoService;
 use App\Services\EnvioService;
