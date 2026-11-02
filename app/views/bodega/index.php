@@ -16,7 +16,13 @@
     </div>
   </div>
   <div id="tabsPlaza"></div>
-  <div id="buscador"></div>
+  <div class="d-flex align-items-end gap-2 mb-3 flex-wrap">
+    <div id="buscador" class="mb-0"></div>
+    <div style="max-width:280px">
+      <label class="form-label small text-muted mb-1">Filtrar por proyecto RENTEC</label>
+      <select class="form-select" id="filtroRentec"><option value="">Todos</option></select>
+    </div>
+  </div>
   <div id="barraSel"></div>
   <div class="card card-soft">
     <div class="table-responsive">
@@ -51,7 +57,7 @@
 
 <script>
 const MODULO = 'bodega';
-let plazaActual = null, busqueda = '', catalogos = null, seleccion = new Set();
+let plazaActual = null, busqueda = '', catalogos = null, seleccion = new Set(), proyectoRentecActual = '';
 
 async function cargarCatalogos() {
   catalogos = await Api.get('obtenerCatalogos');
@@ -60,6 +66,12 @@ async function cargarCatalogos() {
   selD.innerHTML = catalogos.dispositivos.map(d => `<option value="${d.id}">${UI.esc(d.nombre)}</option>`).join('');
   selD.addEventListener('change', llenarModelos);
   llenarModelos();
+
+  const proyectos = await Api.get('rentecListar');
+  const selR = document.getElementById('filtroRentec');
+  selR.innerHTML = '<option value="">Todos</option>' + (proyectos || [])
+    .map(p => `<option value="${p.id}">${UI.esc(p.folio)} · ${UI.esc(p.nombre)}</option>`).join('');
+  selR.addEventListener('change', () => { proyectoRentecActual = selR.value; cargar(); });
 }
 function llenarModelos() {
   const dispId = parseInt(document.getElementById('fDispositivo').value || 0);
@@ -71,6 +83,7 @@ async function cargar() {
   const params = { modulo: MODULO, por_pagina: 200 };
   if (plazaActual) params.plaza_id = plazaActual;
   if (busqueda) params.busqueda = busqueda;
+  if (proyectoRentecActual) params.proyecto_rentec_id = proyectoRentecActual;
   const r = await Api.get('listarActivos', params);
   const activos = r.activos || [];
   document.getElementById('tbody').innerHTML = activos.map(a => UI.filaActivo(a, { seleccionable: true })).join('');

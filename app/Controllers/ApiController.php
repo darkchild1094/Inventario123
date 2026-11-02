@@ -187,6 +187,10 @@ class ApiController
             'dispositivo_id' => $_GET['dispositivo_id'] ?? null,
             'status'         => $statusFiltro,
             'busqueda'       => $_GET['busqueda']       ?? null,
+            // Narrows dentro del módulo (bodega, mi_stock, etc.) a lo que
+            // tocó un proyecto RENTEC concreto. Solo acota, no amplía el
+            // alcance, así que no necesita validación extra de permisos.
+            'proyecto_rentec_id' => !empty($_GET['proyecto_rentec_id']) ? (int) $_GET['proyecto_rentec_id'] : null,
         ];
 
         $modulo = trim((string) ($_GET['modulo'] ?? ''));

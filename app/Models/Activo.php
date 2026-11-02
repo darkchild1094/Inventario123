@@ -178,7 +178,16 @@ class Activo
             $params[':bodega_id'] = (int) $bodega_id;
         }
         if ($proyecto_rentec_id) {
-            $sqlBase .= ' AND a.proyecto_rentec_id = :proyecto_rentec_id';
+            // Por bitácora (movimiento), no por la columna en vivo: un activo
+            // que ya se retiró bajo este proyecto se le limpia la etiqueta de
+            // activo.proyecto_rentec_id (si no, aparece como "pendiente de
+            // instalar" en el detalle del proyecto para siempre) pero su
+            // historial sigue marcado, que es lo que de verdad identifica
+            // "esto pasó por este proyecto".
+            $sqlBase .= ' AND EXISTS (
+                SELECT 1 FROM movimiento m
+                WHERE m.activo_id = a.id AND m.proyecto_rentec_id = :proyecto_rentec_id
+            )';
             $params[':proyecto_rentec_id'] = (int) $proyecto_rentec_id;
         }
         if ($solo_rentec) {
