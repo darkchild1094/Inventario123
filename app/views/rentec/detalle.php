@@ -18,10 +18,14 @@
       <button class="btn btn-outline-secondary d-none" id="btnFinalizar">Finalizar</button>
     </div>
   </div>
-  <h6 class="text-muted">Pendientes (en bodega, por instalar)</h6>
-  <div id="pendientes" class="mb-4"></div>
-  <h6 class="text-muted">Instalados</h6>
-  <div id="instalados"></div>
+  <ul class="nav nav-tabs mb-3" id="tabsRentecDetalle">
+    <li class="nav-item"><button class="nav-link active" data-pane="pendientes">Pendientes <span class="badge bg-warning text-dark" id="cntPendientes">0</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-pane="instalados">Instalados <span class="badge bg-success" id="cntInstalados">0</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-pane="retirados">Retirados <span class="badge bg-secondary" id="cntRetirados">0</span></button></li>
+  </ul>
+  <div id="pendientes"></div>
+  <div id="instalados" class="d-none"></div>
+  <div id="retirados" class="d-none"></div>
 </div>
 
 <div class="modal fade" id="modalAgregar" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
@@ -82,8 +86,40 @@ async function cargar() {
       <span class="text-muted small font-monospace ms-2">${UI.esc(m.serie_entra||'')}</span>
       <div class="text-muted small">${UI.esc(m.tienda_nombre || '')}${m.serie_sale ? ' · sustituyó a ' + UI.esc(m.serie_sale) : ''}</div>
     </div></div>`).join('') || '<div class="text-muted small">Sin instalados.</div>';
+
+  // Retirados = el lado "sale" de cada reemplazo (ya pareado con su
+  // instalación) + los que salieron sin que entrara nada en su lugar.
+  const retiradosPareados = (d.detalle_instalados || []).filter(m => m.serie_sale).map(m => ({
+    equipo: [m.dispositivo_sale_nombre, m.marca_sale_nombre, m.modelo_sale_nombre].filter(Boolean).join(' · '),
+    serie: m.serie_sale, codigo: m.codigo_sale, tienda: m.tienda_nombre,
+    nota: 'sustituido por ' + (m.serie_entra || ''),
+  }));
+  const retiradosSolos = (d.detalle_retirados_sin_reemplazo || []).map(r => ({
+    equipo: [r.dispositivo_nombre, r.marca_nombre, r.modelo_nombre].filter(Boolean).join(' · '),
+    serie: r.serie, codigo: r.codigo_barras, tienda: r.tienda_nombre,
+    nota: 'sin reemplazo directo',
+  }));
+  const retirados = [...retiradosPareados, ...retiradosSolos];
+  document.getElementById('retirados').innerHTML = retirados.map(r => `
+    <div class="card mb-1 border-secondary"><div class="card-body py-2">
+      <span class="badge bg-secondary me-2">Retirado</span>
+      ${UI.esc(r.equipo || '—')}
+      <span class="text-muted small font-monospace ms-2">${UI.esc(r.serie||'')}${r.codigo ? ' · CB:'+UI.esc(r.codigo):''}</span>
+      <div class="text-muted small">${UI.esc(r.tienda || '—')} · ${UI.esc(r.nota)}</div>
+    </div></div>`).join('') || '<div class="text-muted small">Sin retirados.</div>';
+
+  document.getElementById('cntPendientes').textContent = (d.detalle_recibidos || []).length;
+  document.getElementById('cntInstalados').textContent = (d.detalle_instalados || []).length;
+  document.getElementById('cntRetirados').textContent = retirados.length;
+
   document.getElementById('btnExcel').href = 'index.php?controller=export&action=rentec&id=' + ID;
 }
+
+document.querySelectorAll('#tabsRentecDetalle .nav-link').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('#tabsRentecDetalle .nav-link').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['pendientes', 'instalados', 'retirados'].forEach(p => document.getElementById(p).classList.toggle('d-none', p !== btn.dataset.pane));
+}));
 
 function llenarModelos() {
   const dispId = parseInt(document.getElementById('fDispositivo').value || 0);
