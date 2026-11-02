@@ -2,62 +2,25 @@
 
 namespace App\Controllers;
 
-use App\Models\Activo;
-use App\Models\Movimiento;
-use App\Models\Tienda;
-use App\Models\Usuario;
-use App\Models\Modelo;
-use App\Helpers\Permisos;
-
 /**
- * DashboardController — pantalla principal para todos los roles.
- * Muestra KPIs de inventario (acotados por el scope del rol), el desglose por
- * tipo de equipo y por plaza, los movimientos recientes y accesos rápidos.
+ * DashboardController — pantalla principal para todos los roles, igual que
+ * en la app Android: 4 tarjetas, avance RENTEC, inventario de tiendas,
+ * bodega por plaza, mi stock por tipo. Todo se calcula en vivo en el JS de
+ * la vista contra ApiController::resumenDashboard() + rentecListar().
  */
 class DashboardController
 {
     private $db;
-    private AuthController $auth;
 
     public function __construct($db)
     {
-        $this->db   = $db;
-        $this->auth = new AuthController($db);
-        $this->auth->requerirAutenticacion();
+        $this->db = $db;
+        if (session_status() === PHP_SESSION_NONE) session_start();
+        (new AuthController($db))->requerirAutenticacion();
     }
 
     public function index(): void
     {
-        $tipo = Permisos::tipo();
-
-        $activoModel = new Activo($this->db);
-        $resumen = $activoModel->resumen(Permisos::filtrosScope());
-
-        // Conteo por módulo visible (para las tarjetas).
-        $modulos   = Permisos::modulos();
-        $porModulo = [];
-        foreach ($modulos as $m) {
-            $clave = $m['clave'];
-            // apk no es un módulo de activos: no tiene sentido contarle 'activos', y
-            // sin este continue caía en el 'default' de filtrosModulo() y mostraba el
-            // total de TODOS los activos del sistema en su tarjeta.
-            if (in_array($clave, ['dashboard', 'consulta', 'usuarios', 'apk'], true)) continue;
-            $porModulo[$clave] = $activoModel->resumen(Permisos::filtrosModulo($clave))['total'];
-        }
-
-        $movs = (new Movimiento($this->db))
-            ->listar(Permisos::filtrosHistorial(), 1, 8)['movimientos'] ?? [];
-
-        // Contadores de catálogo (solo admin).
-        $extras = [];
-        if ($tipo === 'admin') {
-            $extras = [
-                'tiendas'  => count((new Tienda($this->db))->obtenerTodas()),
-                'usuarios' => count((new Usuario($this->db))->obtenerTodos()),
-                'modelos'  => count((new Modelo($this->db))->obtenerTodos()),
-            ];
-        }
-
         $navActivo = 'dashboard';
         require ROOT_PATH . '/app/views/dashboard/index.php';
     }

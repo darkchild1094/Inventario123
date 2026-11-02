@@ -380,23 +380,6 @@ class Permisos
         ));
     }
 
-    /**
-     * Al revés de MODULOS_SOLO_WEB: pantallas que solo existen en la app
-     * Android (ej. 'movimientos', línea de tiempo nueva del rediseño — el
-     * panel web no tiene vista equivalente). Sin filtrarlos, el navbar web
-     * mostraría un link roto (controller inexistente).
-     */
-    private const MODULOS_SOLO_APP = ['movimientos', 'stock_usuarios', 'auditoria', 'transferencias'];
-
-    /** modulos(), sin los que son exclusivos de la app. Lo que ve el panel web. */
-    public static function modulosWeb(): array
-    {
-        return array_values(array_filter(
-            self::modulos(),
-            fn($m) => !in_array($m['clave'], self::MODULOS_SOLO_APP, true)
-        ));
-    }
-
     /** ¿El rol en sesión puede ver este módulo? */
     public static function moduloPermitido(string $modulo): bool
     {

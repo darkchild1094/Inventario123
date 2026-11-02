@@ -1,6 +1,9 @@
 <?php if (!defined('BOOTSTRAP_LOADED')): ?>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>body { background: #F1F3F5; }</style>
+    <script src="assets/js/api.js"></script>
+    <script src="assets/js/ui.js"></script>
     <?php define('BOOTSTRAP_LOADED', true); endif; ?>
 
 <?php
@@ -93,6 +96,10 @@ $badgeColor = match ($tipo) {
     <button class="app-burger" type="button" data-app-burger aria-label="Menú"><i class="fas fa-bars"></i></button>
     <img src="assets/img/logo_texto_white_520x120.png" alt="Inventario 123"
          onerror="this.replaceWith(document.createTextNode('Inventario 123'))">
+    <a href="index.php?controller=notificacion" class="text-white ms-auto position-relative" style="font-size:1.1rem">
+        <i class="fas fa-bell"></i>
+        <span class="badge bg-danger rounded-pill position-absolute top-0 start-100 translate-middle d-none" id="campanaBadgeMobile" style="font-size:.6rem">0</span>
+    </a>
 </header>
 <div class="app-backdrop" id="appBackdrop"></div>
 
@@ -101,11 +108,28 @@ $badgeColor = match ($tipo) {
         <img src="assets/img/logo_texto_white_520x120.png" alt="Inventario 123"
              onerror="this.replaceWith(document.createTextNode('Inventario 123'))">
     </a>
+    <a href="index.php?controller=notificacion" class="position-absolute text-white" style="top:1rem; right:1rem; font-size:1.1rem">
+        <i class="fas fa-bell"></i>
+        <span class="badge bg-danger rounded-pill position-absolute top-0 start-100 translate-middle d-none" id="campanaBadge" style="font-size:.6rem">0</span>
+    </a>
 
     <nav class="app-nav">
         <?php
-        $moduloAc = $_GET['modulo'] ?? '';
-        $modulos  = \App\Helpers\Permisos::modulosWeb();
+        // Clave de módulo -> controlador dedicado. Misma fuente que la app
+        // Android (Permisos::modulos()): el panel web ya no tiene un
+        // subconjunto distinto de módulos.
+        $CONTROLLER_POR_CLAVE = [
+            'tiendas'        => 'tienda',
+            'rentec'         => 'rentec',
+            'bodega'         => 'bodega',
+            'mi_stock'       => 'mistock',
+            'stock_pfs'      => 'stockusuarios', // mismo listado, con selector de usuario
+            'stock_usuarios' => 'stockusuarios',
+            'movimientos'    => 'movimientos',
+            'auditoria'      => 'auditoria',
+            'transferencias' => 'transferencias',
+        ];
+        $modulos  = \App\Helpers\Permisos::modulos();
         foreach ($modulos as $m):
             $clave = $m['clave'];
             if ($clave === 'dashboard'):
@@ -118,21 +142,18 @@ $badgeColor = match ($tipo) {
                 continue; // va en la sección Administración
             elseif ($clave === 'apk'):
                 continue; // va en la sección Administración
+            elseif (isset($CONTROLLER_POR_CLAVE[$clave])):
+                $destCtrl = $CONTROLLER_POR_CLAVE[$clave];
+                $href = 'index.php?controller=' . $destCtrl;
+                $activo = $ctrl === $destCtrl;
             else:
-                $href = 'index.php?modulo=' . urlencode($clave);
-                $activo = $moduloAc === $clave;
+                continue;
             endif;
         ?>
             <a class="<?= $activo ? 'active' : '' ?>" href="<?= $href ?>">
                 <i class="fas <?= htmlspecialchars($m['icono']) ?>"></i> <?= htmlspecialchars($m['etiqueta']) ?>
             </a>
         <?php endforeach; ?>
-
-        <?php if (in_array($tipo, ['admin', 'coordinador', 'pfs', 'ati'], true)): ?>
-            <a class="<?= $ctrl === 'historial' ? 'active' : '' ?>" href="index.php?controller=historial&action=index">
-                <i class="fas fa-clock-rotate-left"></i> Historial
-            </a>
-        <?php endif; ?>
 
         <?php if ($tipo === 'admin'): ?>
             <div class="app-sep">Administración</div>
@@ -196,6 +217,14 @@ $badgeColor = match ($tipo) {
         a.addEventListener('click', function () { if (window.innerWidth < 992) cerrar(); });
     });
 })();
+Api.get('contarNotificacionesNoLeidas').then(function (r) {
+    var n = r.n ?? 0;
+    if (!n) return;
+    ['campanaBadge', 'campanaBadgeMobile'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) { el.textContent = n; el.classList.remove('d-none'); }
+    });
+});
 </script>
 
 <?php if (!defined('BOOTSTRAP_JS_LOADED')): ?>

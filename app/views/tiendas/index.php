@@ -12,7 +12,15 @@
 <?php $puedeAsignarAti = $puedeAsignarAti ?? false; ?>
 
 <div class="container py-4">
-    <h2 class="h3 fw-bold mb-1"><i class="fas fa-store text-primary me-2"></i>Tiendas</h2>
+    <div class="d-flex align-items-center justify-content-between mb-1">
+        <h2 class="h3 fw-bold mb-0"><i class="fas fa-store text-primary me-2"></i>Tiendas</h2>
+        <div class="d-flex gap-2">
+            <a id="btnExcel" class="btn btn-outline-secondary" href="index.php?controller=export&action=modulo&modulo=tiendas<?= $plazaId ? '&plaza_id=' . (int) $plazaId : '' ?>"><i class="fas fa-file-excel me-1"></i>Excel</a>
+            <?php if ($puedeAsignarAti): ?>
+                <button class="btn btn-primary" id="btnNuevaTienda"><i class="fas fa-plus me-1"></i>Nueva tienda</button>
+            <?php endif; ?>
+        </div>
+    </div>
     <p class="text-muted">Entra a una tienda para ver y administrar sus activos.
         <?php if ($puedeAsignarAti): ?>
             El <strong>ATI responsable</strong> recibe en su stock los activos que pasan a garantía o baja.
@@ -62,7 +70,7 @@
                 <tr>
                     <td class="text-muted"><?= htmlspecialchars($t['cr_tienda'] ?? '') ?></td>
                     <td class="fw-bold">
-                        <a href="index.php?modulo=tiendas&tienda_id=<?= (int) $t['id'] ?>" class="text-decoration-none">
+                        <a href="index.php?controller=tienda&action=detalle&id=<?= (int) $t['id'] ?>" class="text-decoration-none">
                             <?= htmlspecialchars($t['nombre']) ?>
                         </a>
                     </td>
@@ -85,7 +93,14 @@
                     </td>
                     <?php endif; ?>
                     <td class="text-end">
-                        <a href="index.php?modulo=tiendas&tienda_id=<?= (int) $t['id'] ?>" class="btn btn-sm btn-outline-primary">
+                        <?php if ($puedeAsignarAti): ?>
+                        <button class="btn btn-sm btn-outline-secondary js-editar" data-id="<?= (int) $t['id'] ?>"
+                            data-cr="<?= htmlspecialchars($t['cr_tienda'] ?? '') ?>" data-nombre="<?= htmlspecialchars($t['nombre']) ?>"
+                            data-plaza="<?= (int) ($t['plaza_id'] ?? 0) ?>" data-ati="<?= (int) ($t['ati_usuario_id'] ?? 0) ?>">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <?php endif; ?>
+                        <a href="index.php?controller=tienda&action=detalle&id=<?= (int) $t['id'] ?>" class="btn btn-sm btn-outline-primary">
                             Ver activos <i class="fas fa-arrow-right ms-1"></i>
                         </a>
                     </td>
@@ -96,7 +111,45 @@
     </div>
 </div>
 
+<div class="modal fade" id="modalTienda" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title" id="modalTiendaTitulo">Tienda</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input type="hidden" id="tId">
+    <div class="mb-2"><label class="form-label small">CR (único)</label><input class="form-control" id="tCr"></div>
+    <div class="mb-2"><label class="form-label small">Nombre</label><input class="form-control" id="tNombre"></div>
+    <div class="mb-2"><label class="form-label small">Plaza</label>
+      <select class="form-select" id="tPlaza"><?php foreach ($plazasTodas as $p): ?><option value="<?= $p['id'] ?>"><?= htmlspecialchars($p['nombre']) ?></option><?php endforeach; ?></select></div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+    <button class="btn btn-primary" id="btnGuardarTienda">Guardar</button></div>
+</div></div></div>
+
 <script>
+document.getElementById('btnNuevaTienda')?.addEventListener('click', () => {
+  document.getElementById('modalTiendaTitulo').textContent = 'Nueva tienda';
+  document.getElementById('tId').value = ''; document.getElementById('tCr').value = ''; document.getElementById('tNombre').value = '';
+  new bootstrap.Modal(document.getElementById('modalTienda')).show();
+});
+document.querySelectorAll('.js-editar').forEach(btn => btn.addEventListener('click', () => {
+  document.getElementById('modalTiendaTitulo').textContent = 'Editar tienda';
+  document.getElementById('tId').value = btn.dataset.id;
+  document.getElementById('tCr').value = btn.dataset.cr;
+  document.getElementById('tNombre').value = btn.dataset.nombre;
+  document.getElementById('tPlaza').value = btn.dataset.plaza;
+  new bootstrap.Modal(document.getElementById('modalTienda')).show();
+}));
+document.getElementById('btnGuardarTienda').addEventListener('click', async () => {
+  const id = document.getElementById('tId').value;
+  const data = {
+    cr_tienda: document.getElementById('tCr').value.trim(),
+    nombre: document.getElementById('tNombre').value.trim(),
+    plaza_id: document.getElementById('tPlaza').value,
+  };
+  if (!data.cr_tienda || !data.nombre) { UI.toast('Faltan datos.', 'error'); return; }
+  const r = id ? await Api.post('tiendaActualizar', { id, ...data }) : await Api.post('tiendaCrear', data);
+  if (r.success) { UI.toast(r.message || 'Guardado.'); location.reload(); } else UI.toast(r.message || 'No se pudo guardar.', 'error');
+});
+
 document.querySelectorAll('.js-ati').forEach(sel => {
     sel.addEventListener('change', async () => {
         const alertBox = document.getElementById('tiendaAlert');

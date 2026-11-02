@@ -193,10 +193,6 @@ switch ($controllerName) {
         $controller = new \App\Controllers\UsuarioController($db);
         break;
 
-    case 'historial':
-        $controller = new \App\Controllers\HistorialController($db);
-        break;
-
     case 'tienda':
         $controller = new \App\Controllers\TiendaController($db);
         break;
@@ -217,9 +213,41 @@ switch ($controllerName) {
         $controller = new \App\Controllers\ConsultaController($db);
         break;
 
-    default:
-        $controller = new \App\Controllers\HomeController($db);
+    case 'bodega':
+        $controller = new \App\Controllers\BodegaController($db);
         break;
+
+    case 'mistock':
+        $controller = new \App\Controllers\MiStockController($db);
+        break;
+
+    case 'stockusuarios':
+        $controller = new \App\Controllers\StockUsuariosController($db);
+        break;
+
+    case 'movimientos':
+        $controller = new \App\Controllers\MovimientosController($db);
+        break;
+
+    case 'rentec':
+        $controller = new \App\Controllers\RentecWebController($db);
+        break;
+
+    case 'auditoria':
+        $controller = new \App\Controllers\AuditoriaController($db);
+        break;
+
+    case 'transferencias':
+        $controller = new \App\Controllers\TransferenciaWebController($db);
+        break;
+
+    case 'notificacion':
+        $controller = new \App\Controllers\NotificacionController($db);
+        break;
+
+    default:
+        header('Location: index.php?controller=dashboard');
+        exit;
 }
 
 // ── Ejecución ─────────────────────────────────────────────────────────────────

@@ -65,4 +65,23 @@ class TiendaController
         $navActivo = 'tiendas';
         require ROOT_PATH . '/app/views/tiendas/index.php';
     }
+
+    /** Detalle de tienda: activos instalados, inventario (checklist), registrar activo. */
+    public function detalle(): void
+    {
+        if (!Permisos::moduloPermitido('tiendas')) {
+            $_SESSION['error'] = 'No tienes acceso al módulo de Tiendas.';
+            header('Location: index.php?controller=dashboard');
+            exit;
+        }
+        $id = (int) ($_GET['id'] ?? 0);
+        $tienda = (new Tienda($this->db))->obtenerPorId($id);
+        if (!$tienda) {
+            $_SESSION['error'] = 'Tienda no encontrada.';
+            header('Location: index.php?controller=tienda');
+            exit;
+        }
+        $navActivo = 'tiendas';
+        require ROOT_PATH . '/app/views/tiendas/detalle.php';
+    }
 }
