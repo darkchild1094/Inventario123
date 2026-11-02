@@ -43,8 +43,10 @@
     <div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="iRetiraChk">
       <label class="form-check-label" for="iRetiraChk">Retirar equipo existente de la tienda</label></div>
     <div id="iRetiraBox" class="d-none">
-      <select class="form-select mb-2" id="iRetiraSel"></select>
-      <label class="form-label small">Destino del equipo retirado</label>
+      <div class="form-text mb-1">Si el nuevo equipo sustituye a varias unidades viejas (ej. un UPS nuevo reemplaza a 3 chicos), agrégalas todas aquí.</div>
+      <div id="iRetiraFilas"></div>
+      <button type="button" class="btn btn-sm btn-outline-primary mb-2" id="btnIRetiraMas"><i class="fas fa-plus me-1"></i>Agregar otro equipo retirado</button>
+      <label class="form-label small d-block">Destino de los equipos retirados</label>
       <select class="form-select" id="iRetiraDestino">
         <option value="en_bodega">A bodega</option><option value="baja">Baja</option><option value="garantia">Garantía</option>
       </select>
@@ -114,13 +116,28 @@ async function abrirInstalar(activoId) {
   document.getElementById('iTienda').onchange = cargarRetirables;
   new bootstrap.Modal(document.getElementById('modalInstalar')).show();
 }
+let iRetiraOpts = '';
 async function cargarRetirables() {
   const tiendaId = document.getElementById('iTienda').value;
   const r = await Api.get('listarActivos', { modulo: 'tiendas', tienda_id: tiendaId, status: 'en_uso', por_pagina: 200 });
-  document.getElementById('iRetiraSel').innerHTML = (r.activos || []).map(a =>
+  iRetiraOpts = (r.activos || []).map(a =>
     `<option value="${a.id}">${UI.esc([a.dispositivo_nombre, a.modelo_nombre].filter(Boolean).join(' · '))} - ${UI.esc(a.serie||'')}</option>`).join('')
     || '<option value="">(sin equipo instalado en esta tienda)</option>';
+  document.getElementById('iRetiraFilas').innerHTML = '';
+  agregarFilaRetiro('iRetiraFilas', iRetiraOpts);
 }
+function agregarFilaRetiro(contenedorId, opts) {
+  const cont = document.getElementById(contenedorId);
+  const fila = document.createElement('div');
+  fila.className = 'input-group mb-2 fila-retiro';
+  fila.innerHTML = `<select class="form-select">${opts}</select>
+    <button type="button" class="btn btn-outline-danger btn-quitar-fila" tabindex="-1"><i class="fas fa-xmark"></i></button>`;
+  fila.querySelector('.btn-quitar-fila').addEventListener('click', () => {
+    if (cont.querySelectorAll('.fila-retiro').length > 1) fila.remove();
+  });
+  cont.appendChild(fila);
+}
+document.getElementById('btnIRetiraMas').addEventListener('click', () => agregarFilaRetiro('iRetiraFilas', iRetiraOpts));
 document.getElementById('iRetiraChk').addEventListener('change', (e) => {
   document.getElementById('iRetiraBox').classList.toggle('d-none', !e.target.checked);
 });
@@ -130,13 +147,29 @@ document.getElementById('btnInstalarOk').addEventListener('click', async () => {
     tienda_uso_id: document.getElementById('iTienda').value,
     proyecto_rentec_id: ID,
   };
-  if (document.getElementById('iRetiraChk').checked && document.getElementById('iRetiraSel').value) {
-    data.reemplaza_activo_id = document.getElementById('iRetiraSel').value;
+  let retirarIds = [];
+  if (document.getElementById('iRetiraChk').checked) {
+    retirarIds = Array.from(document.querySelectorAll('#iRetiraFilas .fila-retiro select'))
+      .map(s => s.value).filter(v => v);
+    retirarIds = [...new Set(retirarIds)];
+  }
+  if (retirarIds.length) {
+    data.reemplaza_activo_id = retirarIds[0];
     data.salida_destino = document.getElementById('iRetiraDestino').value;
   }
   const r = await Api.post('actualizarActivo', data);
-  if (r.success) { UI.toast('Instalado.'); bootstrap.Modal.getInstance(document.getElementById('modalInstalar')).hide(); cargar(); }
-  else UI.toast(r.message || 'No se pudo instalar.', 'error');
+  if (!r.success) { UI.toast(r.message || 'No se pudo instalar.', 'error'); return; }
+  // Equipos retirados adicionales (más allá del primero, que ya quedó
+  // ligado como reemplazo): se retiran igual pero sin el enlace 1 a 1,
+  // porque la bitácora solo soporta un activo_relacionado_id por entrada.
+  for (const extraId of retirarIds.slice(1)) {
+    await Api.post('actualizarActivo', {
+      id: extraId, status: document.getElementById('iRetiraDestino').value,
+      tienda_uso_id: document.getElementById('iTienda').value, proyecto_rentec_id: ID,
+      motivo: 'Retiro adicional junto con la instalación de activo ' + pendienteActual,
+    });
+  }
+  UI.toast('Instalado.'); bootstrap.Modal.getInstance(document.getElementById('modalInstalar')).hide(); cargar();
 });
 
 document.getElementById('btnFinalizar').addEventListener('click', async () => {

@@ -68,8 +68,10 @@
 
     <div id="paneReemplazo" class="d-none">
       <h6 class="text-danger">Retiro</h6>
-      <div class="mb-2"><label class="form-label small">Activo instalado a retirar</label><select class="form-select" id="remActivo"></select></div>
-      <div class="mb-3"><label class="form-label small">Destino del retirado</label>
+      <div class="form-text mb-1">Si el nuevo equipo sustituye a varias unidades viejas, agrégalas todas.</div>
+      <div id="remFilas"></div>
+      <button type="button" class="btn btn-sm btn-outline-primary mb-2" id="btnRemMas"><i class="fas fa-plus me-1"></i>Agregar otro equipo retirado</button>
+      <div class="mb-3"><label class="form-label small">Destino de los retirados</label>
         <select class="form-select" id="remDestino"><option value="en_bodega">A bodega</option><option value="baja">Baja</option><option value="garantia">Garantía</option></select></div>
       <h6 class="text-success">Instalación</h6>
       <div class="row">
@@ -146,7 +148,9 @@ async function abrirRegistrar() {
   const instalados = (await Api.get('listarActivos', { modulo: 'tiendas', tienda_id: TIENDA_ID, status: 'en_uso', por_pagina: 300 })).activos || [];
   const opts = instalados.map(a => `<option value="${a.id}">${UI.esc([a.dispositivo_nombre,a.modelo_nombre].filter(Boolean).join(' · '))} - ${UI.esc(a.serie||'')}</option>`).join('') || '<option value="">(sin equipo instalado)</option>';
   document.getElementById('retActivo').innerHTML = opts;
-  document.getElementById('remActivo').innerHTML = opts;
+  remOpts = opts;
+  document.getElementById('remFilas').innerHTML = '';
+  agregarFilaRetiro('remFilas', remOpts);
 
   document.querySelectorAll('#tabsRegistrar .nav-link').forEach(b => b.classList.remove('active'));
   document.querySelector('#tabsRegistrar [data-tab=instalacion]').classList.add('active');
@@ -174,19 +178,41 @@ document.getElementById('btnGuardarRegistro').addEventListener('click', async ()
     if (r.success) { UI.toast('Retirado.'); bootstrap.Modal.getInstance(document.getElementById('modalRegistrar')).hide(); cargar(); }
     else UI.toast(r.message || 'No se pudo retirar.', 'error');
   } else {
-    const retId = document.getElementById('remActivo').value;
+    let retIds = Array.from(document.querySelectorAll('#remFilas .fila-retiro select')).map(s => s.value).filter(v => v);
+    retIds = [...new Set(retIds)];
     const serie = document.getElementById('remSerie').value.trim();
-    if (!retId) { UI.toast('Elige el activo a retirar.', 'error'); return; }
+    if (!retIds.length) { UI.toast('Elige al menos un activo a retirar.', 'error'); return; }
     if (!serie) { UI.toast('Falta la serie del equipo que entra.', 'error'); return; }
+    const destino = document.getElementById('remDestino').value;
     const r = await Api.post('guardarActivo', {
       serie, codigo_barras: document.getElementById('remCodigo').value.trim() || null,
       modelo_id: document.getElementById('remModelo').value, status: 'en_uso', tienda_uso_id: TIENDA_ID,
-      reemplaza_activo_id: retId, salida_destino: document.getElementById('remDestino').value,
+      reemplaza_activo_id: retIds[0], salida_destino: destino,
     });
-    if (r.success) { UI.toast('Reemplazo registrado.'); bootstrap.Modal.getInstance(document.getElementById('modalRegistrar')).hide(); cargar(); }
-    else UI.toast(r.message || 'No se pudo registrar.', 'error');
+    if (!r.success) { UI.toast(r.message || 'No se pudo registrar.', 'error'); return; }
+    for (const extraId of retIds.slice(1)) {
+      await Api.post('actualizarActivo', {
+        id: extraId, status: destino, tienda_uso_id: TIENDA_ID,
+        motivo: 'Retiro adicional junto con el reemplazo de serie ' + serie,
+      });
+    }
+    UI.toast('Reemplazo registrado.'); bootstrap.Modal.getInstance(document.getElementById('modalRegistrar')).hide(); cargar();
   }
 });
+
+let remOpts = '';
+function agregarFilaRetiro(contenedorId, opts) {
+  const cont = document.getElementById(contenedorId);
+  const fila = document.createElement('div');
+  fila.className = 'input-group mb-2 fila-retiro';
+  fila.innerHTML = `<select class="form-select">${opts}</select>
+    <button type="button" class="btn btn-outline-danger btn-quitar-fila" tabindex="-1"><i class="fas fa-xmark"></i></button>`;
+  fila.querySelector('.btn-quitar-fila').addEventListener('click', () => {
+    if (cont.querySelectorAll('.fila-retiro').length > 1) fila.remove();
+  });
+  cont.appendChild(fila);
+}
+document.getElementById('btnRemMas').addEventListener('click', () => agregarFilaRetiro('remFilas', remOpts));
 
 async function guardarInstalacion(serie, codigo, modeloId, moverExistente) {
   const r = await Api.post('guardarActivo', {
