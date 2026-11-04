@@ -336,6 +336,7 @@ class ApiController
             'encontrado'        => true,
             'serie'             => $anterior['serie'] ?? null,
             'codigo_barras'     => $anterior['codigo_barras'] ?? null,
+            'num_activo'        => $anterior['num_activo'] ?? null,
             'dispositivo_nombre'=> $anterior['dispositivo_nombre'] ?? null,
             'modelo_nombre'     => $anterior['modelo_nombre'] ?? null,
             'foto_equipo'       => $anterior['foto_equipo'] ?? null,

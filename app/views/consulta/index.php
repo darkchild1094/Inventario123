@@ -131,16 +131,32 @@
         }));
         modalEl.querySelector('#btnTransferirOk').addEventListener('click', async () => {
             const destino = div.querySelector('input[name=destinoC]:checked').value;
-            const datos = {
-                id: activoId, serie: act.serie || '', codigo_barras: act.codigo_barras || '',
-                modelo_id: act.modelo_id || '',
-            };
-            if (destino === 'bodega') { datos.status = 'en_bodega'; datos.plaza_id = document.getElementById('cSelBodega').value; }
-            else if (destino === 'usuario') { datos.status = 'asignado'; datos.asignado_usuario_id = document.getElementById('cSelUsuario').value; }
-            else { datos.status = 'en_uso'; datos.tienda_uso_id = document.getElementById('cSelTienda').value; }
-            const resp = await fetch('index.php?controller=api&action=actualizarActivo', {
-                method: 'POST', body: new URLSearchParams(datos), headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            });
+            // "A bodega" y "a un stock" cambian de MANOS/plaza: eso pasa por
+            // enviarActivos (igual que "Enviar" en Bodega/Mi Stock), el único
+            // endpoint que de verdad resuelve una plaza/usuario destino
+            // distinto y además notifica al receptor. actualizarActivo
+            // ignora cualquier plaza_id del cliente (siempre usa la plaza
+            // actual del activo) y bloquea el traspaso a otra persona.
+            let resp;
+            if (destino === 'tienda') {
+                const datos = {
+                    id: activoId, serie: act.serie || '', codigo_barras: act.codigo_barras || '',
+                    modelo_id: act.modelo_id || '', status: 'en_uso',
+                    tienda_uso_id: document.getElementById('cSelTienda').value,
+                };
+                resp = await fetch('index.php?controller=api&action=actualizarActivo', {
+                    method: 'POST', body: new URLSearchParams(datos), headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+            } else {
+                const fd = new URLSearchParams();
+                fd.append('activos[]', activoId);
+                fd.append('tipo', destino);
+                if (destino === 'bodega') fd.append('plaza_id', document.getElementById('cSelBodega').value);
+                else fd.append('usuario_id', document.getElementById('cSelUsuario').value);
+                resp = await fetch('index.php?controller=api&action=enviarActivos', {
+                    method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+            }
             const r = await resp.json();
             if (r.success) {
                 bootstrap.Modal.getInstance(modalEl).hide();
