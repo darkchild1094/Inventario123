@@ -394,7 +394,7 @@ class ExportController
     private function estiloEncabezado($sheet, int $fila, array $headers): void
     {
         foreach ($headers as $i => $h) {
-            $sheet->setCellValueByColumnAndRow($i + 1, $fila, $h);
+            $sheet->setCellValue([$i + 1, $fila], $h);
         }
         $colFin = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
         $sheet->getStyle("A{$fila}:{$colFin}{$fila}")->applyFromArray([
@@ -416,9 +416,9 @@ class ExportController
         foreach ($valores as $i => $v) {
             $col = $i + 1;
             if (in_array($col, $columnasTexto, true)) {
-                $sheet->setCellValueExplicitByColumnAndRow($col, $fila, (string) $v, DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([$col, $fila], (string) $v, DataType::TYPE_STRING);
             } else {
-                $sheet->setCellValueByColumnAndRow($col, $fila, $v);
+                $sheet->setCellValue([$col, $fila], $v);
             }
         }
     }
