@@ -87,12 +87,72 @@
               <div class="col-md-6"><i class="fas fa-sitemap text-muted me-1"></i> Región: ${esc(u && u.region_nombre || '—')} / ${esc(u && u.negocio_nombre || '—')}</div>
               <div class="col-md-6"><i class="fas fa-right-from-bracket text-muted me-1"></i> Procedencia: ${esc(u && u.procedencia || '—')}</div>
             </div>
-            <a href="index.php?action=detalle&id=${a.id}" class="btn btn-sm btn-outline-primary mt-3">
-              <i class="fas fa-up-right-from-square me-1"></i> Ver ficha completa
-            </a>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button class="btn btn-sm btn-outline-secondary" onclick="UI.verDetalleActivo(${a.id})">
+                <i class="fas fa-circle-info me-1"></i> Ver ficha completa
+              </button>
+              <button class="btn btn-sm btn-primary" onclick="abrirTransferir(${a.id})">
+                <i class="fas fa-right-left me-1"></i> Transferir
+              </button>
+            </div>
           </div>
         </div>`;
     }
+
+    window.abrirTransferir = async function (activoId) {
+        const act = window.__ultimoActivo || {};
+        if (!window.__catalogosConsulta) window.__catalogosConsulta = await Api.get('obtenerCatalogos');
+        const cat = window.__catalogosConsulta;
+        const id = 'modalTransferir';
+        document.getElementById(id)?.remove();
+        const div = document.createElement('div');
+        div.innerHTML = `<div class="modal fade" id="${id}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+          <div class="modal-header"><h5 class="modal-title">Transferir activo</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+          <div class="modal-body">
+            <div class="form-check mb-2"><input class="form-check-input" type="radio" name="destinoC" value="bodega" id="cRdBodega" checked>
+              <label class="form-check-label" for="cRdBodega">A bodega</label></div>
+            <select class="form-select mb-3" id="cSelBodega">${cat.plazas.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('')}</select>
+            <div class="form-check mb-2"><input class="form-check-input" type="radio" name="destinoC" value="usuario" id="cRdUsuario">
+              <label class="form-check-label" for="cRdUsuario">A un stock (usuario)</label></div>
+            <select class="form-select mb-3" id="cSelUsuario" disabled>${(cat.usuarios||[]).map(u => `<option value="${u.id}">${esc(u.nombre)}</option>`).join('')}</select>
+            <div class="form-check mb-2"><input class="form-check-input" type="radio" name="destinoC" value="tienda" id="cRdTienda">
+              <label class="form-check-label" for="cRdTienda">A una tienda</label></div>
+            <select class="form-select" id="cSelTienda" disabled>${cat.tiendas.map(t => `<option value="${t.id}">${esc(t.nombre)}${t.cr_tienda ? ' · ' + esc(t.cr_tienda) : ''}</option>`).join('')}</select>
+          </div>
+          <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button class="btn btn-primary" id="btnTransferirOk">Transferir</button></div>
+        </div></div></div>`;
+        document.body.appendChild(div);
+        const modalEl = div.querySelector('.modal');
+        div.querySelectorAll('input[name=destinoC]').forEach(r => r.addEventListener('change', () => {
+            document.getElementById('cSelBodega').disabled = r.value !== 'bodega' || !r.checked;
+            document.getElementById('cSelUsuario').disabled = r.value !== 'usuario' || !r.checked;
+            document.getElementById('cSelTienda').disabled = r.value !== 'tienda' || !r.checked;
+        }));
+        modalEl.querySelector('#btnTransferirOk').addEventListener('click', async () => {
+            const destino = div.querySelector('input[name=destinoC]:checked').value;
+            const datos = {
+                id: activoId, serie: act.serie || '', codigo_barras: act.codigo_barras || '',
+                modelo_id: act.modelo_id || '',
+            };
+            if (destino === 'bodega') { datos.status = 'en_bodega'; datos.plaza_id = document.getElementById('cSelBodega').value; }
+            else if (destino === 'usuario') { datos.status = 'asignado'; datos.asignado_usuario_id = document.getElementById('cSelUsuario').value; }
+            else { datos.status = 'en_uso'; datos.tienda_uso_id = document.getElementById('cSelTienda').value; }
+            const resp = await fetch('index.php?controller=api&action=actualizarActivo', {
+                method: 'POST', body: new URLSearchParams(datos), headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const r = await resp.json();
+            if (r.success) {
+                bootstrap.Modal.getInstance(modalEl).hide();
+                estado.textContent = ''; salida.innerHTML = '<div class="alert alert-success">Activo transferido.</div>';
+                consultar();
+            } else {
+                alert(r.message || 'No se pudo transferir.');
+            }
+        });
+        modalEl.addEventListener('hidden.bs.modal', () => div.remove());
+        new bootstrap.Modal(modalEl).show();
+    };
 
     function timeline(historial) {
         if (!historial || !historial.length) return '<p class="text-muted small">Sin movimientos registrados.</p>';
@@ -145,6 +205,7 @@
             }
             estado.textContent = '';
             if (data.activo) {
+                window.__ultimoActivo = data.activo;
                 salida.innerHTML = tarjetaUbicacion(data.activo, data.ubicacion) + timeline(data.historial);
             } else if (data.coincidencias) {
                 salida.innerHTML = '<p class="text-muted small">' + data.coincidencias.length +

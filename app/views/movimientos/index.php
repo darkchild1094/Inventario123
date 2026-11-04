@@ -8,7 +8,10 @@
 <body>
 <?php include ROOT_PATH . '/app/views/components/navbar.php'; ?>
 <div class="container-fluid px-3 px-lg-4 py-4">
-  <h4 class="fw-bold mb-3"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Movimientos</h4>
+  <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>Movimientos <span class="text-muted fs-6" id="contador"></span></h4>
+    <a id="btnExcel" class="btn btn-outline-secondary"><i class="fas fa-file-excel me-1"></i>Excel de esta pestaña</a>
+  </div>
   <ul class="nav nav-pills gap-2 mb-3" id="tabsLugar">
     <li class="nav-item"><button class="nav-link active" data-v="">Todos</button></li>
     <li class="nav-item"><button class="nav-link" data-v="bodega">Bodega</button></li>
@@ -48,7 +51,7 @@ async function cargar() {
         const equipo = [m.eq_dispositivo, m.eq_marca, m.eq_modelo].filter(Boolean).join(' · ');
         const serie = m.eq_serie || m.eq_codigo_barras || '';
         const hora = (m.creado_en.split(' ')[1] || '').substring(0,5);
-        return `<div class="list-group-item">
+        return `<div class="list-group-item" style="cursor:pointer" onclick="UI.verDetalleActivo(${m.activo_id})">
           <div class="d-flex justify-content-between">
             <span class="badge bg-primary">${UI.esc(EVENTO_LBL[m.evento] || m.evento)}</span>
             <span class="text-muted small">${hora}</span>
@@ -61,6 +64,11 @@ async function cargar() {
       }).join('')}
     </div></div>`).join('');
   document.getElementById('timeline').innerHTML = html || '<div class="text-muted mt-3">Sin movimientos.</div>';
+  document.getElementById('contador').textContent = `(${movs.length})`;
+  const p = new URLSearchParams({ controller: 'export', action: 'movimientos' });
+  if (lugarTipo) p.set('lugar_tipo', lugarTipo);
+  if (busqueda) p.set('serie', busqueda);
+  document.getElementById('btnExcel').href = 'index.php?' + p.toString();
 }
 
 document.querySelectorAll('#tabsLugar .nav-link').forEach(b => b.addEventListener('click', () => {

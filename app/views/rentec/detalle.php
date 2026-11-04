@@ -77,10 +77,11 @@ async function cargar() {
         <span class="badge bg-warning text-dark me-2">Pendiente</span>
         ${UI.esc([a.dispositivo_nombre, a.marca_nombre, a.modelo_nombre].filter(Boolean).join(' · '))}
         <span class="text-muted small font-monospace ms-2">${UI.esc(a.serie||'')}${a.codigo_barras ? ' · CB:'+UI.esc(a.codigo_barras):''}</span>
+        <button class="btn btn-sm btn-link text-muted float-end p-0" onclick="event.stopPropagation(); UI.verDetalleActivo(${a.activo_id})" title="Ver detalle"><i class="fas fa-circle-info"></i></button>
       </div>
     </div>`).join('') || '<div class="text-muted small">Sin pendientes.</div>';
   document.getElementById('instalados').innerHTML = (d.detalle_instalados || []).map(m => `
-    <div class="card mb-1 border-success"><div class="card-body py-2">
+    <div class="card mb-1 border-success" style="cursor:pointer" onclick="UI.verDetalleActivo(${m.activo_id})"><div class="card-body py-2">
       <span class="badge bg-success me-2">Instalado</span>
       ${UI.esc([m.dispositivo_nombre, m.marca_nombre, m.modelo_nombre].filter(Boolean).join(' · '))}
       <span class="text-muted small font-monospace ms-2">${UI.esc(m.serie_entra||'')}</span>
@@ -90,18 +91,20 @@ async function cargar() {
   // Retirados = el lado "sale" de cada reemplazo (ya pareado con su
   // instalación) + los que salieron sin que entrara nada en su lugar.
   const retiradosPareados = (d.detalle_instalados || []).filter(m => m.serie_sale).map(m => ({
+    activo_id: m.activo_relacionado_id,
     equipo: [m.dispositivo_sale_nombre, m.marca_sale_nombre, m.modelo_sale_nombre].filter(Boolean).join(' · '),
     serie: m.serie_sale, codigo: m.codigo_sale, tienda: m.tienda_nombre,
     nota: 'sustituido por ' + (m.serie_entra || ''),
   }));
   const retiradosSolos = (d.detalle_retirados_sin_reemplazo || []).map(r => ({
+    activo_id: r.activo_id,
     equipo: [r.dispositivo_nombre, r.marca_nombre, r.modelo_nombre].filter(Boolean).join(' · '),
     serie: r.serie, codigo: r.codigo_barras, tienda: r.tienda_nombre,
     nota: 'sin reemplazo directo',
   }));
   const retirados = [...retiradosPareados, ...retiradosSolos];
   document.getElementById('retirados').innerHTML = retirados.map(r => `
-    <div class="card mb-1 border-secondary"><div class="card-body py-2">
+    <div class="card mb-1 border-secondary" style="cursor:pointer" onclick="UI.verDetalleActivo(${r.activo_id})"><div class="card-body py-2">
       <span class="badge bg-secondary me-2">Retirado</span>
       ${UI.esc(r.equipo || '—')}
       <span class="text-muted small font-monospace ms-2">${UI.esc(r.serie||'')}${r.codigo ? ' · CB:'+UI.esc(r.codigo):''}</span>

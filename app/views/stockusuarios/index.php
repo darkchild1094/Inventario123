@@ -14,7 +14,7 @@
 <?php include ROOT_PATH . '/app/views/components/navbar.php'; ?>
 <div class="container-fluid px-3 px-lg-4 py-4">
   <div class="d-flex align-items-center justify-content-between mb-3">
-    <h4 class="fw-bold mb-0"><i class="fas fa-people-group me-2 text-primary"></i>Stock usuarios</h4>
+    <h4 class="fw-bold mb-0"><i class="fas fa-people-group me-2 text-primary"></i>Stock usuarios <span class="text-muted fs-6" id="contador"></span></h4>
     <a id="btnExcel" class="btn btn-outline-secondary"><i class="fas fa-file-excel me-1"></i>Excel</a>
   </div>
   <div id="tabsPlaza"></div>
@@ -42,8 +42,9 @@ async function cargar() {
       </div>
       <div class="card-body pt-0 d-none stock-detalle">
         ${(u.activos||[]).length ? `<table class="table table-sm mb-0"><tbody>
-          ${u.activos.map(a => `<tr><td>${UI.esc([a.tipo,a.modelo].filter(Boolean).join(' · '))}</td>
-            <td class="text-muted small font-monospace">${UI.esc(a.serie||'')}${a.codigo_barras ? ' · CB:'+UI.esc(a.codigo_barras) : ''}</td></tr>`).join('')}
+          ${u.activos.map(a => `<tr style="cursor:pointer" onclick="UI.verDetalleActivo(${a.id})"><td>${UI.esc([a.tipo,a.modelo].filter(Boolean).join(' · '))}</td>
+            <td class="text-muted small font-monospace">${UI.esc(a.serie||'')}${a.codigo_barras ? ' · CB:'+UI.esc(a.codigo_barras) : ''}</td>
+            <td class="text-end"><i class="fas fa-circle-info text-muted"></i></td></tr>`).join('')}
         </tbody></table>` : '<div class="text-muted small">Sin activos.</div>'}
       </div>
     </div>`).join('') || '<div class="text-muted">Sin usuarios en esta plaza.</div>';
@@ -51,6 +52,8 @@ async function cargar() {
   document.querySelectorAll('.usr-card').forEach(c => c.addEventListener('click', () => {
     c.parentElement.querySelector('.stock-detalle').classList.toggle('d-none');
   }));
+  const totalActivos = (usuarios || []).reduce((acc, u) => acc + (u.activos_count || 0), 0);
+  document.getElementById('contador').textContent = `(${(usuarios||[]).length} usuarios · ${totalActivos} activos)`;
   document.getElementById('btnExcel').href = UI.excelHref('stock_usuarios', { plaza_id: plazaActual });
 }
 

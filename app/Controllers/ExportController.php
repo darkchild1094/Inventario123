@@ -6,7 +6,7 @@ use App\Models\Activo;
 use App\Models\Movimiento;
 use App\Models\ProyectoRentec;
 use App\Helpers\Permisos;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -19,15 +19,12 @@ require_once ROOT_PATH . '/vendor/autoload.php';
 /**
  * ExportController — femsa_assets
  *
- * Genera Excel de inventario (descarga directa, un clic):
- *  - Una pestaña por Negocio-Plaza (activos en bodega)
- *  - Una pestaña por ingeniero (activos en su stock personal)
- *  - Una pestaña por ingeniero con su HISTORIAL de movimientos
- *    (altas, bajas y reemplazos: equipo que entró y el que salió)
- *  - Una pestaña por tienda, SÓLO con los activos "en uso" cuyo origen o
- *    traspaso vino de bodega. Los que están en la tienda por otra vía
- *    (import directo, movidos por el ATI, tienda→tienda) no se exportan.
- * Todo acotado al alcance del rol (Permisos::filtrosExportar()).
+ * Genera Excel de inventario y movimientos (descarga directa, un clic).
+ * Todas las hojas se construyen desde cero con un diseño propio (título +
+ * subtítulo con fecha/total, encabezado oscuro, zebra striping, autofiltro,
+ * fila congelada) en vez de depender de una plantilla externa — así cada
+ * columna nueva (como N° de Activo) no exige editar un .xlsx a mano.
+ * Todo acotado al alcance del rol (Permisos::filtrosExportar()/filtrosModulo()).
  */
 class ExportController
 {
@@ -43,7 +40,10 @@ class ExportController
         'DEFAULT'    => ['fondo' => 'FF212529', 'texto' => Color::COLOR_WHITE],
     ];
 
-    private const FILA_INICIO  = 5;
+    private const COLOR_ENCABEZADO = 'FF212529'; // BsDark
+    private const COLOR_BANDA      = 'FFF8F9FA'; // franja cebra, muy claro
+    private const COLOR_BORDE      = 'FFDEE2E6';
+    private const COLOR_SUBTITULO  = 'FF6C757D';
 
     public function __construct($db)
     {
@@ -51,12 +51,10 @@ class ExportController
         if (session_status() === PHP_SESSION_NONE) session_start();
     }
 
-    /** Descarga directa del Excel de inventario, acotado por el rol. */
+    /** Descarga directa del Excel de inventario completo, acotado por el rol. */
     public function inventario(): void
     {
         $this->verificarPermisos();
-
-        // Catálogos grandes + PhpSpreadsheet: sube el límite para no reventar a los 120 s.
         @set_time_limit(600);
         @ini_set('memory_limit', '768M');
 
@@ -66,58 +64,35 @@ class ExportController
 
         [$activosBodega, $activosUsuario, $activosTienda] = $this->agruparActivos($listaActivos);
 
-        $rutaPlantilla = ROOT_PATH . '/storage/templates/inventario_bodega.xlsx';
-        if (!file_exists($rutaPlantilla)) {
-            die('Error: No se encontró la plantilla de Excel.');
-        }
+        $spreadsheet = new Spreadsheet();
+        $hojaIdx     = 0;
+        $movModel    = new Movimiento($this->db);
 
-        $spreadsheet = IOFactory::load($rutaPlantilla);
-        $hojaBase    = $spreadsheet->getActiveSheet();
-        $hojaMolde   = clone $hojaBase;
-        $esPrimera   = true;
-
-        // 1) una pestaña por bodega (negocio - plaza)
         foreach ($activosBodega as $nombre => $activos) {
-            $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
-            if (!$esPrimera) $spreadsheet->addSheet($hoja);
-            $this->llenarHoja($hoja, $activos, $nombre, 'bodega');
-            $esPrimera = false;
+            $this->llenarHoja($this->hojaEn($spreadsheet, $hojaIdx++), $activos, $nombre, 'bodega');
         }
-
-        // 2) por cada ingeniero: su stock personal + su historial de movimientos
-        $movModel = new Movimiento($this->db);
         foreach ($activosUsuario as $nombre => $activos) {
-            $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
-            if (!$esPrimera) $spreadsheet->addSheet($hoja);
-            $this->llenarHoja($hoja, $activos, $nombre, 'usuario');
-            $esPrimera = false;
-
+            $this->llenarHoja($this->hojaEn($spreadsheet, $hojaIdx++), $activos, $nombre, 'usuario');
             $engId = (int) ($activos[0]['usuario_stock_id'] ?? 0);
             if ($engId > 0) {
                 $movs = $movModel->listar(['usuario_id' => $engId], 1, 100_000)['movimientos'] ?? [];
                 if ($movs) {
-                    $hojaMov = $spreadsheet->createSheet();
-                    $this->llenarHojaMovimientos($hojaMov, $movs, $nombre . ' - MOV');
+                    $this->llenarHojaMovimientos($this->hojaEn($spreadsheet, $hojaIdx++), $movs, $nombre . ' - MOV');
                 }
             }
         }
-
-        // 3) una pestaña por tienda — SÓLO con los activos "en uso" cuyo origen o
-        //    traspaso vino de bodega. Los que están en la tienda por otra vía
-        //    (importados directo, movidos por el ATI, tienda→tienda) se omiten.
         foreach ($activosTienda as $nombre => $activos) {
-            $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
-            if (!$esPrimera) $spreadsheet->addSheet($hoja);
-            $this->llenarHoja($hoja, $activos, $nombre, 'tienda');
-            $esPrimera = false;
+            $this->llenarHoja($this->hojaEn($spreadsheet, $hojaIdx++), $activos, $nombre, 'tienda');
         }
 
+        if ($hojaIdx === 0) { $this->llenarHoja($this->hojaEn($spreadsheet, 0), [], 'SIN DATOS', 'bodega'); }
+        $spreadsheet->setActiveSheetIndex(0);
         $this->descargarExcel($spreadsheet, 'Inventario_' . date('Y-m-d_H-i') . '.xlsx');
     }
 
     /**
      * Exporta SÓLO los activos de un módulo (Tiendas, Bodega, Mi Stock,
-     * Stock PFS, ATI), acotado al rol. ?modulo=<m>[&tienda_id=][&plaza_id=]
+     * Stock PFS, ATI), acotado al rol. ?modulo=<m>[&tienda_id=][&plaza_id=][&proyecto_rentec_id=]
      */
     public function modulo(): void
     {
@@ -145,6 +120,10 @@ class ExportController
         if ($plazaGet > 0 && (Permisos::esAdmin() || in_array($plazaGet, Permisos::misPlazas(), true))) {
             $filtros['plaza_id'] = $plazaGet;
         }
+        $rentecGet = (int) ($_GET['proyecto_rentec_id'] ?? 0);
+        if ($rentecGet > 0) {
+            $filtros['proyecto_rentec_id'] = $rentecGet;
+        }
 
         $activos = (new Activo($this->db))->obtenerTodosFiltrado($filtros, 1, 999_999)['activos'] ?? [];
 
@@ -168,20 +147,12 @@ class ExportController
         ksort($grupos);
         if (!$grupos) { $grupos = ['SIN DATOS' => []]; }
 
-        $rutaPlantilla = ROOT_PATH . '/storage/templates/inventario_bodega.xlsx';
-        if (!file_exists($rutaPlantilla)) die('Error: No se encontró la plantilla de Excel.');
-
-        $spreadsheet = IOFactory::load($rutaPlantilla);
-        $hojaBase    = $spreadsheet->getActiveSheet();
-        $hojaMolde   = clone $hojaBase;
-        $esPrimera   = true;
+        $spreadsheet = new Spreadsheet();
+        $hojaIdx     = 0;
         $movModel    = new Movimiento($this->db);
 
         foreach ($grupos as $nombre => $lista) {
-            $hoja = $esPrimera ? $hojaBase : clone $hojaMolde;
-            if (!$esPrimera) $spreadsheet->addSheet($hoja);
-            $this->llenarHoja($hoja, $lista, (string) $nombre, $modo);
-            $esPrimera = false;
+            $this->llenarHoja($this->hojaEn($spreadsheet, $hojaIdx++), $lista, (string) $nombre, $modo);
 
             // Para stock personal, añade la pestaña de movimientos del ingeniero.
             if ($modo === 'usuario' && !empty($lista)) {
@@ -189,22 +160,47 @@ class ExportController
                 if ($engId > 0) {
                     $movs = $movModel->listar(['usuario_id' => $engId], 1, 100_000)['movimientos'] ?? [];
                     if ($movs) {
-                        $this->llenarHojaMovimientos($spreadsheet->createSheet(), $movs, $nombre . ' - MOV');
+                        $this->llenarHojaMovimientos($this->hojaEn($spreadsheet, $hojaIdx++), $movs, $nombre . ' - MOV');
                     }
                 }
             }
         }
 
+        $spreadsheet->setActiveSheetIndex(0);
         $etiqueta = preg_replace('/[^A-Za-z0-9_]+/', '', ucfirst($modulo));
         $this->descargarExcel($spreadsheet, "Inventario_{$etiqueta}_" . date('Y-m-d_H-i') . '.xlsx');
     }
 
     /**
-     * Export de un proyecto RENTEC: una sola hoja plana (CR, TIENDA,
-     * Descripción, Cantidad, PFS, —, PLACA, SERIE), calcada del registro de
-     * Activo Fijo real que ya usa el usuario — sin plantilla base, se genera
-     * desde cero (más simple que mantener un .xlsx con logos para un layout
-     * de una sola pestaña).
+     * Export de los movimientos de una pestaña del módulo "Movimientos"
+     * (Bodega / Usuario / Tienda), con los mismos filtros que la pantalla.
+     * ?lugar_tipo=bodega|usuario|tienda [&serie=]
+     */
+    public function movimientos(): void
+    {
+        $this->verificarPermisos();
+        @set_time_limit(300);
+
+        $lugarTipo = trim((string) ($_GET['lugar_tipo'] ?? ''));
+        $filtros = array_filter([
+            'lugar_tipo' => in_array($lugarTipo, ['bodega', 'usuario', 'tienda'], true) ? $lugarTipo : null,
+            'serie'      => $_GET['serie'] ?? null,
+        ], fn($v) => $v !== null && $v !== '');
+        $filtros = array_merge(Permisos::filtrosHistorial(), $filtros);
+
+        $movs = (new Movimiento($this->db))->listar($filtros, 1, 200_000)['movimientos'] ?? [];
+
+        $spreadsheet = new Spreadsheet();
+        $etiqueta = ['bodega' => 'Bodega', 'usuario' => 'Usuario', 'tienda' => 'Tienda'][$lugarTipo] ?? 'Todos';
+        $this->llenarHojaMovimientos($spreadsheet->getActiveSheet(), $movs, "Movimientos {$etiqueta}");
+
+        $this->descargarExcel($spreadsheet, "Movimientos_{$etiqueta}_" . date('Y-m-d_H-i') . '.xlsx');
+    }
+
+    /**
+     * Export de un proyecto RENTEC: tres bloques (instalados con su retiro
+     * pareado si lo hubo, y los retiros sueltos), con N° de Activo de ambos
+     * lados — es justo el dato que antes faltaba para auditar un folio.
      */
     public function rentec(): void
     {
@@ -222,66 +218,60 @@ class ExportController
 
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('TODO');
+        $sheet->setTitle('RENTEC');
 
+        $colFin = 'N';
+        $titulo = trim(($cab['folio'] ?? '') . ' · ' . ($cab['nombre'] ?? ''));
+        $total = count($detalle['detalle_instalados'] ?? []) + count($detalle['detalle_retirados_sin_reemplazo'] ?? []);
+        $this->bloqueTitulo($sheet, $colFin, $titulo, $total, 'movimiento(s)');
+
+        $filaEnc = 4;
         $headers = [
             'CR', 'TIENDA', 'PFS',
-            'INSTALADO', 'Modelo instalado', 'Placa instalada', 'Serie instalada',
-            'RETIRADO', 'Modelo retirado', 'Placa retirada', 'Serie retirada',
+            'INSTALADO', 'Modelo instalado', 'Serie instalada', 'CB instalado', 'N° Activo instalado',
+            'RETIRADO', 'Modelo retirado', 'Serie retirada', 'CB retirado', 'N° Activo retirado',
+            'FECHA',
         ];
-        foreach ($headers as $i => $h) {
-            $sheet->setCellValue([$i + 1, 1], $h);
-        }
-        $sheet->getStyle('A1:K1')->getFont()->setBold(true);
-        $anchos = [
-            'A' => 10, 'B' => 28, 'C' => 14,
-            'D' => 20, 'E' => 18, 'F' => 14, 'G' => 18,
-            'H' => 20, 'I' => 18, 'J' => 14, 'K' => 18,
-        ];
-        foreach ($anchos as $col => $w) {
-            $sheet->getColumnDimension($col)->setWidth($w);
-        }
+        $this->estiloEncabezado($sheet, $filaEnc, $headers);
 
-        $fila = 2;
+        $fila = $filaEnc + 1;
         foreach ($detalle['detalle_instalados'] ?? [] as $row) {
             $hayRetirado = !empty($row['activo_relacionado_id']);
-            $sheet->setCellValue("A{$fila}", $row['cr_tienda'] ?? '');
-            $sheet->setCellValue("B{$fila}", $row['tienda_nombre'] ?? '');
-            $sheet->setCellValue("C{$fila}", $this->claveUsuario($row));
-            $sheet->setCellValue("D{$fila}", $row['dispositivo_nombre'] ?? '');
-            $sheet->setCellValue("E{$fila}", trim(($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
-            $sheet->setCellValue("F{$fila}", $row['codigo_entra'] ?? '');
-            $sheet->setCellValue("G{$fila}", $row['serie_entra'] ?? '');
-            if ($hayRetirado) {
-                $sheet->setCellValue("H{$fila}", $row['dispositivo_sale_nombre'] ?? '');
-                $sheet->setCellValue("I{$fila}", trim(($row['marca_sale_nombre'] ?? '') . ' ' . ($row['modelo_sale_nombre'] ?? '')));
-                $sheet->setCellValue("J{$fila}", $row['codigo_sale'] ?? '');
-                $sheet->setCellValue("K{$fila}", $row['serie_sale'] ?? '');
-            } else {
-                $sheet->setCellValue("H{$fila}", '(equipo adicional, sin retiro)');
-            }
+            $vals = [
+                $row['cr_tienda'] ?? '', $row['tienda_nombre'] ?? '', $this->claveUsuario($row),
+                $row['dispositivo_nombre'] ?? '',
+                trim(($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')),
+                $row['serie_entra'] ?? '', $row['codigo_entra'] ?? '', $row['num_activo_entra'] ?? '',
+                $hayRetirado ? ($row['dispositivo_sale_nombre'] ?? '') : '(equipo adicional, sin retiro)',
+                $hayRetirado ? trim(($row['marca_sale_nombre'] ?? '') . ' ' . ($row['modelo_sale_nombre'] ?? '')) : '',
+                $hayRetirado ? ($row['serie_sale'] ?? '') : '',
+                $hayRetirado ? ($row['codigo_sale'] ?? '') : '',
+                $hayRetirado ? ($row['num_activo_sale'] ?? '') : '',
+                substr((string) ($row['creado_en'] ?? ''), 0, 16),
+            ];
+            $this->escribirFila($sheet, $fila, $vals, [6, 7, 8, 11, 12, 13]);
             $fila++;
         }
-
-        // Equipo retirado SIN que entrara nada en su lugar (micrófonos,
-        // grabadores que simplemente se quitan): mismas columnas de retiro,
-        // las de instalado quedan vacías.
         foreach ($detalle['detalle_retirados_sin_reemplazo'] ?? [] as $row) {
-            $sheet->setCellValue("A{$fila}", $row['cr_tienda'] ?? '');
-            $sheet->setCellValue("B{$fila}", $row['tienda_nombre'] ?? '');
-            $sheet->setCellValue("C{$fila}", $this->claveUsuario($row));
-            $sheet->setCellValue("D{$fila}", '(sin instalación — solo retiro)');
-            $sheet->setCellValue("H{$fila}", $row['dispositivo_nombre'] ?? '');
-            $sheet->setCellValue("I{$fila}", trim(($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')));
-            $sheet->setCellValue("J{$fila}", $row['codigo_barras'] ?? '');
-            $sheet->setCellValue("K{$fila}", $row['serie'] ?? '');
+            $vals = [
+                $row['cr_tienda'] ?? '', $row['tienda_nombre'] ?? '', $this->claveUsuario($row),
+                '(sin instalación — solo retiro)', '', '', '', '',
+                $row['dispositivo_nombre'] ?? '',
+                trim(($row['marca_nombre'] ?? '') . ' ' . ($row['modelo_nombre'] ?? '')),
+                $row['serie'] ?? '', $row['codigo_barras'] ?? '', $row['num_activo'] ?? '',
+                substr((string) ($row['creado_en'] ?? ''), 0, 16),
+            ];
+            $this->escribirFila($sheet, $fila, $vals, [6, 7, 8, 11, 12, 13]);
             $fila++;
         }
 
         $ultima = $fila - 1;
-        if ($ultima >= 2) {
-            $sheet->getStyle("A2:K{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-        }
+        $this->estiloDatos($sheet, $filaEnc, $ultima, $colFin, [1 => 'center', 3 => 'center']);
+        $anchos = ['A' => 10, 'B' => 26, 'C' => 14, 'D' => 20, 'E' => 18, 'F' => 18, 'G' => 14, 'H' => 16,
+                   'I' => 20, 'J' => 18, 'K' => 18, 'L' => 14, 'M' => 16, 'N' => 16];
+        foreach ($anchos as $col => $w) $sheet->getColumnDimension($col)->setWidth($w);
+        $sheet->freezePane('A' . ($filaEnc + 1));
+        $sheet->setAutoFilter("A{$filaEnc}:{$colFin}{$filaEnc}");
 
         $folio = preg_replace('/[^A-Za-z0-9_-]+/', '', $cab['folio'] ?? "id{$id}");
         $this->descargarExcel($spreadsheet, "RENTEC_{$folio}_" . date('Y-m-d_H-i') . '.xlsx');
@@ -294,7 +284,7 @@ class ExportController
         return $model->tocaPlazas((int) $cabecera['id'], Permisos::misPlazas());
     }
 
-    // ── Privados ──────────────────────────────────────────────────────────────
+    // ── Privados: agrupación ─────────────────────────────────────────────────
 
     private function agruparActivos(array $activos): array
     {
@@ -302,7 +292,6 @@ class ExportController
         $porUsuario = [];
         $porTienda  = [];
 
-        // Activos que en algún momento salieron de una bodega (origen / traspaso).
         $idsTienda = [];
         foreach ($activos as $a) {
             if (($a['stock_tipo'] ?? '') === 'tienda') {
@@ -316,11 +305,10 @@ class ExportController
             if ($st === 'bodega') {
                 $porBodega[$this->claveUbicacion($a)][] = $a;
             } elseif ($st === 'tienda') {
-                // Sólo se exportan los activos de tienda con origen en bodega.
                 if (isset($conOrigenBodega[(int) $a['id']])) {
                     $porTienda[$this->claveTienda($a)][] = $a;
                 }
-            } else { // 'usuario' — stock personal de un ingeniero
+            } else {
                 $porUsuario[$this->claveUsuario($a)][] = $a;
             }
         }
@@ -332,11 +320,6 @@ class ExportController
         return [$porBodega, $porUsuario, $porTienda];
     }
 
-    /**
-     * De una lista de ids, cuáles tienen al menos un movimiento cuyo stock
-     * ANTERIOR era una bodega (es decir: llegaron a la tienda desde bodega).
-     * @return array<int,true>  mapa id => true
-     */
     private function activosConOrigenBodega(array $ids): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
@@ -381,70 +364,87 @@ class ExportController
         return $partes[0] . (isset($partes[1]) ? ' ' . $partes[1] : '');
     }
 
-    /** @param string $modo  'bodega' | 'usuario' | 'tienda' — cambia qué va en la columna Ubicación. */
-    private function llenarHoja($sheet, array $activos, string $nombre, string $modo = 'bodega'): void
+    // ── Privados: construcción visual de hojas ──────────────────────────────
+
+    /** Primera hoja del libro en el índice 0, el resto se crean nuevas. */
+    private function hojaEn(Spreadsheet $spreadsheet, int $idx)
     {
-        if (empty($activos)) return;
+        if ($idx === 0) return $spreadsheet->getActiveSheet();
+        return $spreadsheet->createSheet();
+    }
 
-        // La plantilla (storage/templates/inventario_bodega.xlsx) ya trae
-        // los logos de OXXO y Getic integrados en las filas 1-3, y el
-        // encabezado de columnas (fila 4: CANT. | DESCRIPCIÓN | SERIE |
-        // ACTIVO | ESTATUS | TIENDA | PROCEDENCIA) con su estilo. No se
-        // toca esa parte, solo se llenan los datos a partir de la fila 5.
+    /** Título (fila 1) + subtítulo con fecha/total (fila 2), mergeados A:colFin. */
+    private function bloqueTitulo($sheet, string $colFin, string $titulo, int $total, string $unidad = 'equipo(s)'): void
+    {
+        $sheet->mergeCells("A1:{$colFin}1");
+        $sheet->setCellValue('A1', 'INVENTARIO123 · ' . $titulo);
+        $sheet->getStyle('A1')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 14, 'name' => 'Calibri', 'color' => ['argb' => self::COLOR_ENCABEZADO]],
+        ]);
+        $sheet->mergeCells("A2:{$colFin}2");
+        $sheet->setCellValue('A2', "{$total} {$unidad} · generado el " . date('d/m/Y H:i'));
+        $sheet->getStyle('A2')->applyFromArray([
+            'font' => ['italic' => true, 'size' => 9, 'name' => 'Calibri', 'color' => ['argb' => self::COLOR_SUBTITULO]],
+        ]);
+        $sheet->getRowDimension(1)->setRowHeight(22);
+        $sheet->getRowDimension(2)->setRowHeight(14);
+    }
 
-        $tab = mb_substr(preg_replace('/[*:\\/\\\\?\[\]—–]/', '-', $nombre), 0, 31);
-        try {
-            $sheet->setTitle($tab);
-        } catch (\Exception) {
-            $sheet->setTitle(mb_substr($tab, 0, 26) . '_' . rand(10, 99));
+    /** Fila de encabezado de columnas (oscuro, texto blanco, centrado). */
+    private function estiloEncabezado($sheet, int $fila, array $headers): void
+    {
+        foreach ($headers as $i => $h) {
+            $sheet->setCellValueByColumnAndRow($i + 1, $fila, $h);
         }
+        $colFin = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+        $sheet->getStyle("A{$fila}:{$colFin}{$fila}")->applyFromArray([
+            'font'      => ['bold' => true, 'size' => 10, 'name' => 'Calibri', 'color' => ['argb' => Color::COLOR_WHITE]],
+            'fill'      => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => self::COLOR_ENCABEZADO]],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
+        $sheet->getRowDimension($fila)->setRowHeight(26);
+    }
 
-        $fila = self::FILA_INICIO;
-
-        // 1) Volcado de valores (rápido). El estilo por celda de estatus (color
-        //    variable) se guarda para aplicarlo agrupado después.
-        $porColor = [];
-        foreach ($activos as $a) {
-            $statusKey = mb_strtoupper($a['status'] ?? '');
-
-            $sheet->setCellValue("B{$fila}", 1);
-            $sheet->setCellValue("C{$fila}", trim(($a['dispositivo_nombre'] ?? '') . ' ' . ($a['modelo_nombre'] ?? '')));
-            $sheet->setCellValue("D{$fila}", $a['serie'] ?? '');
-            $sheet->setCellValue("E{$fila}", $a['codigo_barras'] ?? '');
-            $sheet->setCellValue("F{$fila}", $statusKey);
-            $sheet->setCellValue("G{$fila}", match ($modo) {
-                'usuario' => trim(($a['negocio_nombre'] ?? '') . ' ' . ($a['plaza_nombre'] ?? '')),
-                'tienda'  => $a['tienda_stock_nombre'] ?? ($a['plaza_nombre'] ?? 'TIENDA'),
-                default   => $a['bodega_nombre'] ?? 'BODEGA',
-            });
-            $sheet->setCellValue("H{$fila}", $a['procedencia_nombre'] ?? '');
-
-            $porColor[$statusKey][] = $fila;
-            $fila++;
-        }
-        $ultima = $fila - 1;
-        if ($ultima < self::FILA_INICIO) return;
-
-        // 2) Estilo de bloque en UNA sola pasada (antes era por fila → O(n) objetos
-        //    de estilo y el timeout de PhpSpreadsheet).
-        $rango = "B" . self::FILA_INICIO . ":H{$ultima}";
-        $sheet->getStyle($rango)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-        $sheet->getStyle($rango)->getFont()->setName('Century Gothic')->setSize(10);
-        $sheet->getStyle("B" . self::FILA_INICIO . ":B{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("D" . self::FILA_INICIO . ":F{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("G" . self::FILA_INICIO . ":H{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        // 3) Color de estatus: un setStyle por grupo de filas contiguas del mismo color.
-        foreach ($porColor as $statusKey => $filas) {
-            $color = self::COLORES_STATUS[$statusKey] ?? self::COLORES_STATUS['DEFAULT'];
-            $estilo = [
-                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => $color['fondo']]],
-                'font' => ['color' => ['argb' => $color['texto']], 'bold' => true],
-                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-            ];
-            foreach ($this->rangosContiguos($filas) as [$ini, $fin]) {
-                $sheet->getStyle("F{$ini}:F{$fin}")->applyFromArray($estilo);
+    /**
+     * Escribe una fila de valores a partir de la columna A, forzando texto
+     * (DataType::TYPE_STRING) en las columnas indicadas por índice 1-based
+     * para que series/códigos/N° de activo con ceros a la izquierda no se
+     * conviertan en número.
+     */
+    private function escribirFila($sheet, int $fila, array $valores, array $columnasTexto = []): void
+    {
+        foreach ($valores as $i => $v) {
+            $col = $i + 1;
+            if (in_array($col, $columnasTexto, true)) {
+                $sheet->setCellValueExplicitByColumnAndRow($col, $fila, (string) $v, DataType::TYPE_STRING);
+            } else {
+                $sheet->setCellValueByColumnAndRow($col, $fila, $v);
             }
+        }
+    }
+
+    /**
+     * Bordes finos + fuente + zebra striping sobre el rango de datos
+     * (filaEnc+1 .. ultima). $centradas: [colIndice1based => 'center'].
+     */
+    private function estiloDatos($sheet, int $filaEnc, int $ultima, string $colFin, array $centradas = []): void
+    {
+        $filaIni = $filaEnc + 1;
+        if ($ultima < $filaIni) return;
+
+        $sheet->getStyle("A{$filaIni}:{$colFin}{$ultima}")->applyFromArray([
+            'font'    => ['name' => 'Calibri', 'size' => 10],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['argb' => self::COLOR_BORDE]]],
+        ]);
+        foreach ($centradas as $colIdx => $_) {
+            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
+            $sheet->getStyle("{$col}{$filaIni}:{$col}{$ultima}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        }
+        // Zebra: filas pares del bloque de datos con fondo gris muy claro.
+        for ($f = $filaIni + 1; $f <= $ultima; $f += 2) {
+            $sheet->getStyle("A{$f}:{$colFin}{$f}")->applyFromArray([
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => self::COLOR_BANDA]],
+            ]);
         }
     }
 
@@ -464,25 +464,95 @@ class ExportController
     }
 
     /**
-     * Pestaña con el historial de movimientos de un ingeniero: qué dio de alta,
-     * qué dio de baja y, en los reemplazos, el equipo que entró y el que salió.
-     * Formato propio (no usa la plantilla).
+     * Hoja de inventario de un grupo (bodega/tienda/usuario): título,
+     * encabezado, N° de Activo, estatus con color, zebra, autofiltro.
+     * @param string $modo  'bodega' | 'usuario' | 'tienda' — cambia qué va en la columna Ubicación.
+     */
+    private function llenarHoja($sheet, array $activos, string $nombre, string $modo = 'bodega'): void
+    {
+        $tab = mb_substr(preg_replace('/[*:\\/\\\\?\[\]—–]/', '-', $nombre), 0, 31);
+        try {
+            $sheet->setTitle($tab ?: 'Hoja');
+        } catch (\Throwable) {
+            $sheet->setTitle(mb_substr($tab, 0, 26) . '_' . rand(10, 99));
+        }
+        if (empty($activos)) {
+            $sheet->setCellValue('A1', 'Sin activos para ' . $nombre . '.');
+            return;
+        }
+
+        $colFin = 'H';
+        $this->bloqueTitulo($sheet, $colFin, $nombre, count($activos));
+
+        $filaEnc = 4;
+        $this->estiloEncabezado($sheet, $filaEnc, [
+            '#', 'Equipo', 'Serie', 'Código de barras', 'N° de Activo', 'Estatus', 'Ubicación', 'Procedencia',
+        ]);
+
+        $fila = $filaEnc + 1;
+        $porColor = [];
+        foreach ($activos as $idx => $a) {
+            $statusKey = mb_strtoupper($a['status'] ?? '');
+            $ubicacion = match ($modo) {
+                'usuario' => trim(($a['negocio_nombre'] ?? '') . ' ' . ($a['plaza_nombre'] ?? '')),
+                'tienda'  => $a['tienda_stock_nombre'] ?? ($a['plaza_nombre'] ?? 'TIENDA'),
+                default   => $a['bodega_nombre'] ?? 'BODEGA',
+            };
+            $this->escribirFila($sheet, $fila, [
+                $idx + 1,
+                trim(($a['dispositivo_nombre'] ?? '') . ' ' . ($a['marca_nombre'] ?? '') . ' ' . ($a['modelo_nombre'] ?? '')),
+                $a['serie'] ?? '', $a['codigo_barras'] ?? '', $a['num_activo'] ?? '',
+                $statusKey, $ubicacion, $a['procedencia_nombre'] ?? '',
+            ], [3, 4, 5]);
+            $porColor[$statusKey][] = $fila;
+            $fila++;
+        }
+        $ultima = $fila - 1;
+
+        $this->estiloDatos($sheet, $filaEnc, $ultima, $colFin, [1 => 'center', 3 => 'c', 4 => 'c', 5 => 'c', 6 => 'c']);
+
+        foreach ($porColor as $statusKey => $filas) {
+            $color = self::COLORES_STATUS[$statusKey] ?? self::COLORES_STATUS['DEFAULT'];
+            $estilo = [
+                'fill'      => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => $color['fondo']]],
+                'font'      => ['color' => ['argb' => $color['texto']], 'bold' => true, 'name' => 'Calibri', 'size' => 10],
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+            ];
+            foreach ($this->rangosContiguos($filas) as [$ini, $fin]) {
+                $sheet->getStyle("F{$ini}:F{$fin}")->applyFromArray($estilo);
+            }
+        }
+
+        $sheet->freezePane('A' . ($filaEnc + 1));
+        $sheet->setAutoFilter("A{$filaEnc}:{$colFin}{$filaEnc}");
+        $anchos = ['A' => 5, 'B' => 36, 'C' => 20, 'D' => 18, 'E' => 16, 'F' => 14, 'G' => 26, 'H' => 24];
+        foreach ($anchos as $col => $w) $sheet->getColumnDimension($col)->setWidth($w);
+    }
+
+    /**
+     * Pestaña con el historial de movimientos (de un ingeniero, o de una
+     * pestaña Bodega/Usuario/Tienda del módulo Movimientos): qué dio de
+     * alta, qué dio de baja y, en los reemplazos, el equipo que entró y el
+     * que salió — con N° de Activo de ambos lados.
      */
     private function llenarHojaMovimientos($sheet, array $movs, string $nombre): void
     {
         $tab = mb_substr(preg_replace('/[*:\\/\\\\?\[\]—–]/', '-', $nombre), 0, 31);
         try {
-            $sheet->setTitle($tab);
+            $sheet->setTitle($tab ?: 'Movimientos');
         } catch (\Throwable) {
             $sheet->setTitle(mb_substr($tab, 0, 26) . '_' . rand(10, 99));
         }
 
-        $enc = ['Fecha', 'Evento', 'Equipo', 'Serie', 'Código', 'N° activo',
-                'Estatus', 'Relación', 'Equipo relacionado', 'Serie rel.',
-                'Código rel.', 'N° activo rel.', 'Nota'];
-        foreach ($enc as $i => $txt) {
-            $sheet->setCellValue([$i + 1, 1], $txt);
-        }
+        $colFin = 'M';
+        $this->bloqueTitulo($sheet, $colFin, $nombre, count($movs), 'movimiento(s)');
+
+        $filaEnc = 4;
+        $this->estiloEncabezado($sheet, $filaEnc, [
+            'Fecha', 'Evento', 'Equipo', 'Serie', 'Código', 'N° de Activo',
+            'Estatus', 'Relación', 'Equipo relacionado', 'Serie rel.',
+            'Código rel.', 'N° de Activo rel.', 'Nota',
+        ]);
 
         $labels = Movimiento::EVENTOS;
         $relLabel = fn(string $ev) => match ($ev) {
@@ -491,7 +561,7 @@ class ExportController
             default           => '',
         };
 
-        $fila = 2;
+        $fila = $filaEnc + 1;
         foreach ($movs as $m) {
             $eq  = trim(($m['eq_dispositivo'] ?? '') . ' · '
                  . trim(($m['eq_marca'] ?? '') . ' ' . ($m['eq_modelo'] ?? '')), ' ·');
@@ -499,45 +569,27 @@ class ExportController
                  . trim(($m['rel_marca'] ?? '') . ' ' . ($m['rel_modelo'] ?? '')), ' ·');
             $estatus = trim(($m['status_anterior'] ?? '—') . ' → ' . ($m['status_nuevo'] ?? '—'), ' →');
 
-            $vals = [
+            $this->escribirFila($sheet, $fila, [
                 substr((string) ($m['creado_en'] ?? ''), 0, 16),
                 $labels[$m['evento']] ?? $m['evento'],
-                $eq,
-                $m['eq_serie'] ?? '',
-                $m['eq_codigo_barras'] ?? '',
-                $m['eq_num_activo'] ?? '',
-                $estatus,
-                $relLabel($m['evento']),
-                $rel,
-                $m['rel_serie'] ?? '',
-                $m['rel_codigo_barras'] ?? '',
-                $m['rel_num_activo'] ?? '',
+                $eq, $m['eq_serie'] ?? '', $m['eq_codigo_barras'] ?? '', $m['eq_num_activo'] ?? '',
+                $estatus, $relLabel($m['evento']), $rel,
+                $m['rel_serie'] ?? '', $m['rel_codigo_barras'] ?? '', $m['rel_num_activo'] ?? '',
                 $m['nota'] ?? '',
-            ];
-            foreach ($vals as $i => $v) {
-                $sheet->setCellValue([$i + 1, $fila], $v);
-            }
+            ], [4, 5, 6, 10, 11, 12]);
             $fila++;
         }
         $ultima = $fila - 1;
 
-        // estilo en una pasada
-        $sheet->getStyle("A1:M1")->applyFromArray([
-            'font' => ['bold' => true, 'color' => ['argb' => Color::COLOR_WHITE]],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF212529']],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-        if ($ultima >= 2) {
-            $sheet->getStyle("A2:M{$ultima}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-            $sheet->getStyle("A2:M{$ultima}")->getFont()->setName('Century Gothic')->setSize(9);
-        }
-        // Anchos fijos (autoSize sobre muchas filas es un cuello de botella).
-        $anchos = ['A' => 16, 'B' => 18, 'C' => 30, 'D' => 20, 'E' => 14, 'F' => 14,
-                   'G' => 20, 'H' => 16, 'I' => 28, 'J' => 20, 'K' => 14, 'L' => 14, 'M' => 45];
+        $this->estiloDatos($sheet, $filaEnc, $ultima, $colFin, [2 => 'c']);
+
+        $anchos = ['A' => 16, 'B' => 18, 'C' => 30, 'D' => 20, 'E' => 14, 'F' => 16,
+                   'G' => 20, 'H' => 16, 'I' => 28, 'J' => 20, 'K' => 14, 'L' => 16, 'M' => 45];
         foreach ($anchos as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
-        $sheet->freezePane('A2');
+        $sheet->freezePane('A' . ($filaEnc + 1));
+        $sheet->setAutoFilter("A{$filaEnc}:{$colFin}{$filaEnc}");
     }
 
     private function descargarExcel(Spreadsheet $spreadsheet, string $nombre): never

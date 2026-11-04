@@ -13,7 +13,7 @@
 
 <div class="container py-4">
     <div class="d-flex align-items-center justify-content-between mb-1">
-        <h2 class="h3 fw-bold mb-0"><i class="fas fa-store text-primary me-2"></i>Tiendas</h2>
+        <h2 class="h3 fw-bold mb-0"><i class="fas fa-store text-primary me-2"></i>Tiendas <span class="text-muted fs-6">(<?= count($tiendas) ?>)</span></h2>
         <div class="d-flex gap-2">
             <a id="btnExcel" class="btn btn-outline-secondary" href="index.php?controller=export&action=modulo&modulo=tiendas<?= $plazaId ? '&plaza_id=' . (int) $plazaId : '' ?>"><i class="fas fa-file-excel me-1"></i>Excel</a>
             <?php if ($puedeAsignarAti): ?>

@@ -9,7 +9,7 @@
 <?php include ROOT_PATH . '/app/views/components/navbar.php'; ?>
 <div class="container-fluid px-3 px-lg-4 py-4">
   <div class="d-flex align-items-center justify-content-between mb-3">
-    <h4 class="fw-bold mb-0"><i class="fas fa-toolbox me-2 text-primary"></i>Mi Stock</h4>
+    <h4 class="fw-bold mb-0"><i class="fas fa-toolbox me-2 text-primary"></i>Mi Stock <span class="text-muted fs-6" id="contador"></span></h4>
     <div class="d-flex gap-2">
       <a id="btnExcel" class="btn btn-outline-secondary"><i class="fas fa-file-excel me-1"></i>Excel</a>
       <button class="btn btn-primary" id="btnAgregar"><i class="fas fa-plus me-1"></i>Agregar activo</button>
@@ -21,7 +21,7 @@
     <div class="table-responsive">
       <table class="table align-middle mb-0">
         <thead class="table-light"><tr>
-          <th style="width:2.5rem"></th><th>Equipo</th><th>Estado</th><th>Procedencia</th><th>Plaza</th>
+          <th style="width:2.5rem"></th><th>Equipo</th><th>Estado</th><th>Procedencia</th><th>Plaza</th><th></th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
@@ -73,6 +73,7 @@ async function cargar() {
   const activos = r.activos || [];
   document.getElementById('tbody').innerHTML = activos.map(a => UI.filaActivo(a, { seleccionable: true })).join('');
   document.getElementById('vacio').style.display = activos.length ? 'none' : 'block';
+  document.getElementById('contador').textContent = `(${r.paginacion?.total_resultados ?? activos.length})`;
   seleccion.clear(); actualizarSeleccion();
   document.querySelectorAll('.sel-chk').forEach(chk => chk.addEventListener('change', (e) => {
     const id = parseInt(e.target.closest('tr').dataset.id);

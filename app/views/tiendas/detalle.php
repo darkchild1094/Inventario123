@@ -11,7 +11,7 @@
   <a href="index.php?controller=tienda" class="text-decoration-none small mb-2 d-inline-block"><i class="fas fa-arrow-left me-1"></i>Tiendas</a>
   <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
     <div>
-      <h4 class="fw-bold mb-0"><?= htmlspecialchars($tienda['nombre']) ?></h4>
+      <h4 class="fw-bold mb-0"><?= htmlspecialchars($tienda['nombre']) ?> <span class="text-muted fs-6" id="contador"></span></h4>
       <div class="text-muted small"><?= htmlspecialchars($tienda['cr_tienda'] ?? '') ?> · <?= htmlspecialchars($tienda['plaza_nombre'] ?? '') ?></div>
     </div>
     <div class="d-flex gap-2">
@@ -121,13 +121,17 @@ async function cargar() {
   const r = await Api.get('listarActivos', params);
   const activos = r.activos || [];
   document.getElementById('tbody').innerHTML = activos.map(a => `
-    <tr><td><div class="fw-semibold">${UI.esc([a.dispositivo_nombre,a.marca_nombre,a.modelo_nombre].filter(Boolean).join(' · '))}</div>
+    <tr><td style="cursor:pointer" onclick="UI.verDetalleActivo(${a.id})"><div class="fw-semibold">${UI.esc([a.dispositivo_nombre,a.marca_nombre,a.modelo_nombre].filter(Boolean).join(' · '))}</div>
       <div class="text-muted small font-monospace">${UI.esc(a.serie||'')}${a.codigo_barras ? ' · CB:'+UI.esc(a.codigo_barras):''}</div></td>
       <td>${UI.statusBadge(a.status)}</td>
       <td class="text-muted small">${UI.esc((a.fecha_alta||'').split(' ')[0]||'')}</td>
-      <td class="text-end">${a.puedeEliminar ? `<button class="btn btn-sm btn-outline-danger btn-del" data-id="${a.id}"><i class="fas fa-trash"></i></button>` : ''}</td>
+      <td class="text-end">
+        <button class="btn btn-sm btn-link text-muted" onclick="UI.verDetalleActivo(${a.id})" title="Ver detalle"><i class="fas fa-circle-info"></i></button>
+        ${a.puedeEliminar ? `<button class="btn btn-sm btn-outline-danger btn-del" data-id="${a.id}"><i class="fas fa-trash"></i></button>` : ''}
+      </td>
     </tr>`).join('');
   document.getElementById('vacio').style.display = activos.length ? 'none' : 'block';
+  document.getElementById('contador').textContent = `(${r.paginacion?.total_resultados ?? activos.length})`;
   document.querySelectorAll('.btn-del').forEach(b => b.addEventListener('click', async () => {
     if (!await UI.confirmar('¿Eliminar este activo?')) return;
     await Api.post('eliminarActivo', { id: b.dataset.id }); cargar();

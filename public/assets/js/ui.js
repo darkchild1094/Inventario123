@@ -124,22 +124,62 @@ const UI = (() => {
     return `index.php?${p.toString()}`;
   }
 
-  /** Fila de un activo para listas tipo Bodega/Mi Stock/Tienda (sin num_activo:
-   *  esa placa NUNCA se muestra en pantalla, ver memoria del proyecto). */
+  /** Fila de un activo para listas tipo Bodega/Mi Stock/Tienda. La fila NO
+   *  muestra num_activo (no es algo que se busque a simple vista en una
+   *  lista); para verlo hay que abrir el detalle — ver verDetalleActivo(). */
   function filaActivo(a, { seleccionable = false } = {}) {
     const equipo = [a.dispositivo_nombre, a.marca_nombre, a.modelo_nombre].filter(Boolean).join(' · ');
     return `
       <tr data-id="${a.id}">
         ${seleccionable ? `<td style="width:2.5rem"><input type="checkbox" class="form-check-input sel-chk"></td>` : ''}
-        <td>
+        <td style="cursor:pointer" onclick="UI.verDetalleActivo(${a.id})">
           <div class="fw-semibold">${esc(equipo || '—')}</div>
           <div class="text-muted small font-monospace">${esc(a.serie || '')}${a.codigo_barras ? ' · CB:' + esc(a.codigo_barras) : ''}</div>
         </td>
         <td>${statusBadge(a.status)}</td>
         <td class="text-muted small">${esc(a.tienda_uso_nombre || a.bodega_nombre || a.usuario_nombre || a.procedencia_nombre || '—')}</td>
         <td class="text-muted small">${esc(a.plaza_nombre || '')}</td>
+        <td class="text-end"><button class="btn btn-sm btn-link text-muted p-0" onclick="UI.verDetalleActivo(${a.id})" title="Ver detalle"><i class="fas fa-circle-info"></i></button></td>
       </tr>`;
   }
 
-  return { esc, statusBadge, toast, confirmar, tabsPlaza, buscadorPill, barraSeleccion, excelHref, filaActivo };
+  /** Modal de solo-lectura con el detalle completo de un activo (incluye
+   *  N° de activo — ver memoria inventario123_num_activo_oculto: visible
+   *  aquí, pero nunca editable en ningún formulario). */
+  async function verDetalleActivo(id) {
+    const id2 = 'uiDetalleActivoModal';
+    document.getElementById(id2)?.remove();
+    const div = document.createElement('div');
+    div.innerHTML = `<div class="modal fade" id="${id2}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Detalle del activo</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body" id="${id2}Body"><div class="text-center py-4"><div class="spinner-border text-primary"></div></div></div>
+    </div></div></div>`;
+    document.body.appendChild(div);
+    const modalEl = div.querySelector('.modal');
+    modalEl.addEventListener('hidden.bs.modal', () => div.remove());
+    new bootstrap.Modal(modalEl).show();
+
+    const a = await Api.get('obtenerActivo', { id });
+    if (a.success === false) {
+      document.getElementById(`${id2}Body`).innerHTML = `<div class="alert alert-danger mb-0">${esc(a.message || 'No se pudo cargar.')}</div>`;
+      return;
+    }
+    const filas = [
+      ['Tipo', [a.dispositivo_nombre, a.marca_nombre, a.modelo_nombre].filter(Boolean).join(' · ')],
+      ['Serie', a.serie || '—'],
+      ['Código de barras', a.codigo_barras || '—'],
+      ['N° de activo', a.num_activo || '—'],
+      ['Estado', STATUS_LABEL[a.status] || a.status],
+      ['Ubicación', a.tienda_uso_nombre || a.bodega_nombre || a.usuario_nombre || a.procedencia_nombre || '—'],
+      ['Plaza', a.plaza_nombre || '—'],
+      ['Procedencia', a.procedencia_nombre || '—'],
+      ['Fecha de alta', (a.fecha_alta || '').replace('T', ' ') || '—'],
+    ];
+    document.getElementById(`${id2}Body`).innerHTML = `<table class="table table-sm mb-0">
+      ${filas.map(([k, v]) => `<tr><th class="text-muted" style="width:40%">${esc(k)}</th><td class="font-monospace">${esc(v)}</td></tr>`).join('')}
+    </table>
+    <div class="form-text mt-2">El N° de activo es informativo (placa oficial FEMSA): nunca se captura ni se edita aquí.</div>`;
+  }
+
+  return { esc, statusBadge, toast, confirmar, tabsPlaza, buscadorPill, barraSeleccion, excelHref, filaActivo, verDetalleActivo };
 })();
